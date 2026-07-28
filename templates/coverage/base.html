@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Shift Coverage{% endblock %}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #f5f5f4;
+      --surface: #ffffff;
+      --border: #e2e8f0;
+      --text: #1a202c;
+      --muted: #718096;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --danger: #dc2626;
+      --success: #16a34a;
+      --warning: #d97706;
+      --radius: 8px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+    }
+    header .brand { font-weight: 700; font-size: 1.1rem; color: var(--accent); text-decoration: none; }
+    header nav a { color: var(--muted); text-decoration: none; font-size: 0.9rem; margin-left: 1.25rem; }
+    header nav a:hover { color: var(--text); }
+
+    .container { max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .card h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+
+    .btn {
+      display: inline-block;
+      padding: 0.5rem 1.25rem;
+      border-radius: var(--radius);
+      border: none;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 500;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    .btn-primary  { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-outline  { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    .btn-outline:hover { background: #eff6ff; }
+    .btn-success  { background: var(--success); color: #fff; }
+    .btn-success:hover { background: #15803d; }
+    .btn-sm { padding: 0.3rem 0.8rem; font-size: 0.85rem; }
+
+    label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.3rem; color: var(--muted); }
+    input, select, textarea {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus, textarea:focus { border-color: var(--accent); }
+    .form-group { margin-bottom: 1rem; }
+    .helptext { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+    .errorlist { color: var(--danger); font-size: 0.85rem; margin-top: 0.25rem; list-style: none; }
+
+    .messages { list-style: none; margin-bottom: 1rem; }
+    .messages li {
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius);
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+    }
+    .messages li.success { background: #dcfce7; color: #166534; }
+    .messages li.error   { background: #fee2e2; color: #991b1b; }
+    .messages li.warning { background: #fef9c3; color: #92400e; }
+    .messages li.info    { background: #dbeafe; color: #1e40af; }
+
+    .badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.2rem 0.6rem;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .badge-draft     { background: #f1f5f9; color: #64748b; }
+    .badge-searching { background: #dbeafe; color: #1e40af; }
+    .badge-covered   { background: #dcfce7; color: #166534; }
+    .badge-uncovered { background: #fee2e2; color: #991b1b; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th { text-align: left; font-size: 0.8rem; color: var(--muted); padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
+    td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+
+    .empty { color: var(--muted); font-size: 0.9rem; text-align: center; padding: 2rem; }
+  </style>
+</head>
+<body>
+<header>
+  <a class="brand" href="/">Shift Coverage</a>
+  <nav>
+    {% if request.session.employee_id %}
+      <a href="{% url 'shift_request_new' %}">+ New Request</a>
+      <a href="{% url 'logout' %}">Log out</a>
+    {% endif %}
+  </nav>
+</header>
+
+<div class="container">
+  {% if messages %}
+  <ul class="messages">
+    {% for message in messages %}
+      <li class="{{ message.tags }}">{{ message }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% block content %}{% endblock %}
+</div>
+</body>
+</html>

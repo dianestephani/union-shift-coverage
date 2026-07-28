@@ -1,0 +1,42 @@
+{% extends "coverage/base.html" %}
+{% block title %}New Shift Request – Shift Coverage{% endblock %}
+
+{% block content %}
+<div style="max-width:520px; margin:0 auto;">
+  <h1 style="font-size:1.4rem; margin-bottom:1.25rem;">Request Shift Coverage</h1>
+
+  <div class="card">
+    <form method="post">
+      {% csrf_token %}
+
+      {% for field in form %}
+      <div class="form-group">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}<p class="helptext">{{ field.help_text }}</p>{% endif %}
+        {% if field.errors %}
+          <ul class="errorlist">
+            {% for error in field.errors %}<li>{{ error }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+      {% endfor %}
+
+      <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
+        <button type="submit" name="action" value="save_draft" class="btn btn-outline" style="flex:1;">
+          Save as draft
+        </button>
+        <button type="submit" name="action" value="find_coverage" class="btn btn-success" style="flex:1;">
+          Find coverage
+        </button>
+      </div>
+
+      <p style="font-size:0.8rem; color:var(--muted); margin-top:0.75rem; text-align:center;">
+        "Find coverage" will immediately start texting the roster.
+      </p>
+    </form>
+  </div>
+
+  <a href="{% url 'dashboard' %}" style="font-size:0.875rem; color:var(--muted);">← Back to dashboard</a>
+</div>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "coverage/base.html" %}
+{% block title %}Log in – Shift Coverage{% endblock %}
+
+{% block content %}
+<div style="max-width:400px; margin:4rem auto;">
+  <div class="card">
+    <h2 style="margin-bottom:0.25rem;">Welcome back</h2>
+    <p style="color:var(--muted); font-size:0.9rem; margin-bottom:1.5rem;">Enter your phone number to log in.</p>
+
+    <form method="post">
+      {% csrf_token %}
+      <div class="form-group">
+        <label for="{{ form.phone_number.id_for_label }}">{{ form.phone_number.label }}</label>
+        {{ form.phone_number }}
+        {% if form.phone_number.help_text %}
+          <p class="helptext">{{ form.phone_number.help_text }}</p>
+        {% endif %}
+        {% if form.phone_number.errors %}
+          <ul class="errorlist">
+            {% for error in form.phone_number.errors %}<li>{{ error }}</li>{% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;">Log in</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
