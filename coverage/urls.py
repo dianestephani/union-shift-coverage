@@ -4,7 +4,6 @@ from . import views
 urlpatterns = [
     # Auth
     path("login/", views.login_view, name="login"),
-    path("logout/", views.logout_view, name="logout"),
 
     # App
     path("", views.dashboard, name="dashboard"),
@@ -12,6 +11,10 @@ urlpatterns = [
     path("request/<int:pk>/", views.shift_request_detail, name="shift_request_detail"),
     path("request/<int:pk>/activate/", views.shift_request_activate, name="shift_request_activate"),
 
-    # Twilio webhook
-    path("sms/inbound/", views.twilio_webhook, name="twilio_webhook"),
+    # Responding to a coverage request
+    path("responses/<int:pk>/answer/", views.respond_to_shift, name="respond_to_shift"),
+
+    # In-app notifications
+    path("notifications/poll/", views.notifications_poll, name="notifications_poll"),
+    path("notifications/<int:pk>/read/", views.notification_mark_read, name="notification_mark_read"),
 ]

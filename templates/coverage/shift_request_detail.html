@@ -63,12 +63,10 @@
         <td>{{ r.employee.name }}</td>
         <td style="font-size:0.85rem; color:var(--muted);">{{ r.asked_at|date:"M j, g:i a" }}</td>
         <td>
-          {% if r.answer == "YES" or r.answer == "UNSURE_YES" %}
+          {% if r.answer == "YES" %}
             <span class="badge badge-covered">{{ r.get_answer_display }}</span>
-          {% elif r.answer == "NO" or r.answer == "UNSURE_NO" %}
+          {% elif r.answer == "NO" %}
             <span class="badge badge-uncovered">{{ r.get_answer_display }}</span>
-          {% elif r.answer == "UNSURE" %}
-            <span class="badge badge-searching">Unsure</span>
           {% else %}
             <span class="badge badge-draft">Pending</span>
           {% endif %}
