@@ -1,10 +1,11 @@
 from django.contrib import admin
-from .models import Employee, ShiftRequest, ShiftResponse, CoverageEvent
+from .models import CoverageEvent, Employee, Notification, ShiftRequest, ShiftResponse
 
 
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
-    list_display = ["seniority_rank", "name", "phone_number", "is_active"]
+    list_display = ["seniority_rank", "name", "email", "user", "phone_number", "is_active"]
+    list_display_links = ["name"]
     list_editable = ["seniority_rank", "is_active"]
     ordering = ["seniority_rank"]
 
@@ -36,4 +37,11 @@ class ShiftResponseAdmin(admin.ModelAdmin):
 class CoverageEventAdmin(admin.ModelAdmin):
     list_display = ["created_at", "shift_request", "event_type", "employee", "message"]
     list_filter = ["event_type"]
+    readonly_fields = ["created_at"]
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ["created_at", "employee", "shift_request", "action_response", "read_at", "message"]
+    list_filter = ["read_at"]
     readonly_fields = ["created_at"]

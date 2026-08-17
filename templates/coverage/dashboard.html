@@ -10,6 +10,33 @@
   <a href="{% url 'shift_request_new' %}" class="btn btn-primary">+ New Request</a>
 </div>
 
+{% if my_pending_responses %}
+<div class="card">
+  <h2>Requests waiting on you</h2>
+  {% for r in my_pending_responses %}
+  <div style="padding:0.75rem 0; {% if not forloop.last %}border-bottom:1px solid var(--border);{% endif %}">
+    <p style="margin-bottom:0.6rem;">
+      <strong>{{ r.shift_request.requester.name }}</strong> needs coverage on
+      {{ r.shift_request.day_display }}, {{ r.shift_request.date_display }}
+      ({{ r.shift_request.time_display }}).
+    </p>
+    <form method="post" action="{% url 'respond_to_shift' r.pk %}" style="display:inline;">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{% url 'dashboard' %}">
+      <input type="hidden" name="answer" value="YES">
+      <button type="submit" class="btn btn-success btn-sm">Yes, I can cover</button>
+    </form>
+    <form method="post" action="{% url 'respond_to_shift' r.pk %}" style="display:inline;">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{% url 'dashboard' %}">
+      <input type="hidden" name="answer" value="NO">
+      <button type="submit" class="btn btn-outline btn-sm">No, can't make it</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="card" style="padding:0; overflow:hidden;">
   {% if my_requests %}
   <table>

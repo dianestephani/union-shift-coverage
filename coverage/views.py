@@ -1,19 +1,16 @@
 import logging
 
 from django.contrib import messages
-from django.http import HttpResponse
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.csrf import csrf_exempt
+from django.utils import timezone
 from django.views.decorators.http import require_POST
-from phonenumber_field.phonenumber import PhoneNumber
 
 from .coverage_service import handle_response, start_coverage_search
-from .forms import PhoneLoginForm, ShiftRequestForm
-from .models import CoverageEvent, Employee, ShiftRequest
+from .forms import ShiftRequestForm
+from .models import CoverageEvent, Employee, Notification, ShiftRequest, ShiftResponse
 
 logger = logging.getLogger(__name__)
-
-SESSION_EMPLOYEE_ID = "employee_id"
 
 
 # ---------------------------------------------------------------------------
@@ -21,17 +18,13 @@ SESSION_EMPLOYEE_ID = "employee_id"
 # ---------------------------------------------------------------------------
 
 def _get_logged_in_employee(request):
-    employee_id = request.session.get(SESSION_EMPLOYEE_ID)
-    if not employee_id:
+    if not request.user.is_authenticated:
         return None
-    try:
-        return Employee.objects.get(pk=employee_id, is_active=True)
-    except Employee.DoesNotExist:
-        return None
+    return getattr(request.user, "employee", None)
 
 
 def login_required_employee(view_func):
-    """Simple decorator – redirects to login if no session employee."""
+    """Simple decorator – redirects to login if no linked employee."""
     from functools import wraps
 
     @wraps(view_func)
@@ -43,40 +36,10 @@ def login_required_employee(view_func):
     return wrapper
 
 
-# ---------------------------------------------------------------------------
-# Auth views
-# ---------------------------------------------------------------------------
-
 def login_view(request):
     if _get_logged_in_employee(request):
         return redirect("dashboard")
-
-    form = PhoneLoginForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
-        raw_phone = form.cleaned_data["phone_number"]
-
-        # Try to parse as E.164 (US default)
-        parsed = PhoneNumber.from_string(raw_phone, region="US")
-        if not parsed.is_valid():
-            form.add_error("phone_number", "Please enter a valid US phone number.")
-        else:
-            e164 = str(parsed)
-            try:
-                employee = Employee.objects.get(phone_number=e164, is_active=True)
-                request.session[SESSION_EMPLOYEE_ID] = employee.pk
-                return redirect("dashboard")
-            except Employee.DoesNotExist:
-                form.add_error(
-                    "phone_number",
-                    "No active account found for that number. Please contact your manager.",
-                )
-
-    return render(request, "coverage/login.html", {"form": form})
-
-
-def logout_view(request):
-    request.session.flush()
-    return redirect("login")
+    return render(request, "coverage/login.html")
 
 
 # ---------------------------------------------------------------------------
@@ -87,9 +50,13 @@ def logout_view(request):
 def dashboard(request):
     employee = _get_logged_in_employee(request)
     my_requests = ShiftRequest.objects.filter(requester=employee).order_by("-created_at")
+    my_pending_responses = ShiftResponse.objects.filter(
+        employee=employee, answer=ShiftResponse.Answer.PENDING
+    ).select_related("shift_request", "shift_request__requester")
     return render(request, "coverage/dashboard.html", {
         "employee": employee,
         "my_requests": my_requests,
+        "my_pending_responses": my_pending_responses,
     })
 
 
@@ -120,7 +87,7 @@ def shift_request_new(request):
         if action == "find_coverage":
             try:
                 start_coverage_search(sr)
-                messages.success(request, "Coverage search started! We'll text the roster for you.")
+                messages.success(request, "Coverage search started! We'll notify the roster for you.")
             except Exception as exc:
                 logger.exception("Error starting coverage search")
                 messages.error(request, f"Could not start search: {exc}")
@@ -167,27 +134,57 @@ def shift_request_activate(request, pk):
 
 
 # ---------------------------------------------------------------------------
-# Twilio inbound SMS webhook
+# Responding to a coverage request (replaces the SMS reply flow)
 # ---------------------------------------------------------------------------
 
-@csrf_exempt
+@login_required_employee
 @require_POST
-def twilio_webhook(request):
-    """
-    Twilio sends a POST with 'From' and 'Body' when an SMS is received.
-    We validate the Twilio signature in production; skipped here for simplicity
-    but see the README for how to enable it.
-    """
-    from_number = request.POST.get("From", "")
-    body = request.POST.get("Body", "")
+def respond_to_shift(request, pk):
+    employee = _get_logged_in_employee(request)
+    shift_response = get_object_or_404(ShiftResponse, pk=pk, employee=employee)
+    answer = request.POST.get("answer", "")
 
-    logger.info("Inbound SMS from %s: %r", from_number, body)
+    try:
+        handle_response(shift_response, employee, answer)
+        messages.success(request, "Your response was recorded.")
+    except ValueError as exc:
+        messages.error(request, str(exc))
 
-    result = handle_response(from_phone=from_number, raw_answer=body)
-    logger.info("handle_response result: %s", result)
+    next_url = request.POST.get("next") or "dashboard"
+    return redirect(next_url)
 
-    # Twilio expects a TwiML response; an empty <Response> means no reply SMS.
-    return HttpResponse(
-        '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-        content_type="text/xml",
+
+# ---------------------------------------------------------------------------
+# In-app notifications (polling)
+# ---------------------------------------------------------------------------
+
+@login_required_employee
+def notifications_poll(request):
+    employee = _get_logged_in_employee(request)
+    unread = Notification.objects.filter(
+        employee=employee, read_at__isnull=True
+    ).select_related("shift_request", "action_response")
+
+    return JsonResponse({
+        "unread_count": unread.count(),
+        "notifications": [
+            {
+                "id": n.pk,
+                "message": n.message,
+                "shift_request_id": n.shift_request_id,
+                "action_response_id": n.action_response_id,
+                "created_at": n.created_at.isoformat(),
+            }
+            for n in unread[:20]
+        ],
+    })
+
+
+@login_required_employee
+@require_POST
+def notification_mark_read(request, pk):
+    employee = _get_logged_in_employee(request)
+    Notification.objects.filter(pk=pk, employee=employee, read_at__isnull=True).update(
+        read_at=timezone.now()
     )
+    return JsonResponse({"ok": True})

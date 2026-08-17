@@ -119,15 +119,62 @@
     tr:last-child td { border-bottom: none; }
 
     .empty { color: var(--muted); font-size: 0.9rem; text-align: center; padding: 2rem; }
+
+    .notif-bell {
+      position: relative;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 1.1rem;
+      color: var(--muted);
+      margin-left: 1.25rem;
+      padding: 0.25rem 0.4rem;
+    }
+    .notif-count {
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      background: var(--danger);
+      color: #fff;
+      font-size: 0.65rem;
+      font-weight: 700;
+      line-height: 1;
+      padding: 0.2rem 0.35rem;
+      border-radius: 9999px;
+      display: none;
+    }
+    .notif-dropdown {
+      display: none;
+      position: absolute;
+      right: 1.5rem;
+      top: 56px;
+      width: 320px;
+      max-height: 400px;
+      overflow-y: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      z-index: 20;
+    }
+    .notif-dropdown.open { display: block; }
+    .notif-item { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .notif-item:last-child { border-bottom: none; }
+    .notif-item a { color: var(--accent); }
   </style>
 </head>
 <body>
-<header>
+<header style="position:relative;">
   <a class="brand" href="/">Shift Coverage</a>
-  <nav>
-    {% if request.session.employee_id %}
+  <nav style="display:flex; align-items:center;">
+    {% if request.user.is_authenticated and employee %}
       <a href="{% url 'shift_request_new' %}">+ New Request</a>
-      <a href="{% url 'logout' %}">Log out</a>
+      <button type="button" class="notif-bell" id="notif-bell">
+        🔔
+        <span class="notif-count" id="notif-count"></span>
+      </button>
+      <div class="notif-dropdown" id="notif-dropdown"></div>
+      <a href="{% url 'account_logout' %}">Log out</a>
     {% endif %}
   </nav>
 </header>
@@ -143,5 +190,46 @@
 
   {% block content %}{% endblock %}
 </div>
+
+{% if request.user.is_authenticated and employee %}
+<script>
+(function () {
+  const bell = document.getElementById("notif-bell");
+  const countEl = document.getElementById("notif-count");
+  const dropdown = document.getElementById("notif-dropdown");
+
+  function render(data) {
+    if (data.unread_count > 0) {
+      countEl.textContent = data.unread_count;
+      countEl.style.display = "inline-block";
+    } else {
+      countEl.style.display = "none";
+    }
+    if (data.notifications.length === 0) {
+      dropdown.innerHTML = '<div class="notif-item">No new notifications.</div>';
+      return;
+    }
+    dropdown.innerHTML = data.notifications.map(function (n) {
+      return '<div class="notif-item">' + n.message +
+        '<br><a href="/request/' + n.shift_request_id + '/">View request →</a></div>';
+    }).join("");
+  }
+
+  function poll() {
+    fetch("{% url 'notifications_poll' %}")
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function () {});
+  }
+
+  bell.addEventListener("click", function () {
+    dropdown.classList.toggle("open");
+  });
+
+  poll();
+  setInterval(poll, 15000);
+})();
+</script>
+{% endif %}
 </body>
 </html>

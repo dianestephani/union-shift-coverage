@@ -1,6 +1,6 @@
 # Shift Coverage
 
-Django app for catering shift coverage. Employees log in with their phone number, post a shift they need covered, and the app cascades a text message down the seniority roster until someone says YES.
+Django app for catering shift coverage. Employees sign in with Google, post a shift they need covered, and the app cascades an in-app notification down the seniority roster until someone hits **Yes**.
 
 ---
 
@@ -16,12 +16,14 @@ shift_coverage/
 │   ├── urls.py
 │   └── wsgi.py
 ├── coverage/              # Main app
-│   ├── models.py          # Employee, ShiftRequest, ShiftResponse, CoverageEvent
-│   ├── views.py           # Auth, dashboard, request form, Twilio webhook
+│   ├── models.py          # Employee, ShiftRequest, ShiftResponse, CoverageEvent, Notification
+│   ├── views.py           # Auth, dashboard, request form, respond/notification endpoints
 │   ├── urls.py
 │   ├── forms.py
-│   ├── sms.py             # Twilio helpers + message text
-│   └── coverage_service.py  # State machine (YES/NO/UNSURE logic)
+│   ├── adapters.py        # Google OAuth signup gating (must match a provisioned Employee)
+│   ├── signals.py         # Links a new Google-authenticated User to its Employee
+│   ├── notifications.py   # In-app notification helpers + message text
+│   └── coverage_service.py  # State machine (YES/NO logic)
 └── templates/coverage/    # HTML templates
 ```
 
@@ -50,9 +52,10 @@ Edit `.env` and fill in:
 | `SECRET_KEY` | Any long random string |
 | `DEBUG` | `True` for local dev, `False` in production |
 | `ALLOWED_HOSTS` | Comma-separated hostnames |
-| `TWILIO_ACCOUNT_SID` | From your Twilio console |
-| `TWILIO_AUTH_TOKEN` | From your Twilio console |
-| `TWILIO_PHONE_NUMBER` | Your Twilio number in E.164 format, e.g. `+15551234567` |
+| `GOOGLE_CLIENT_ID` | From your [Google Cloud Console](https://console.cloud.google.com/apis/credentials) OAuth client |
+| `GOOGLE_CLIENT_SECRET` | From the same OAuth client |
+
+To create the OAuth client: **Google Cloud Console → APIs & Services → Credentials → Create Credentials → OAuth client ID** (type "Web application"), with an authorized redirect URI of `http://127.0.0.1:8000/accounts/google/login/callback/` for local dev.
 
 ### 3. Run migrations
 
@@ -74,10 +77,11 @@ python manage.py runserver
 ```
 
 Go to **Employees → Add employee**. Fill in:
-- **Name** – display name used in SMS messages
-- **Phone number** – in E.164 format, e.g. `+15551234567`
-- **Seniority rank** – `1` = most senior. Coverage requests cascade from the requester toward higher numbers (less senior).
-- **Is active** – uncheck to remove someone from the rotation without deleting them.
+- **Name** – display name used in notifications
+- **Email** – must match the Google account the employee will sign in with; Google logins with no matching employee email are rejected
+- **Seniority rank** – `1` = most senior. Coverage requests cascade from the requester toward higher numbers (less senior)
+- **Is active** – uncheck to remove someone from the rotation without deleting them
+- **Phone number** – optional, kept only as a contact field (no longer used for login or delivery)
 
 ### 6. Run the dev server
 
@@ -85,52 +89,20 @@ Go to **Employees → Add employee**. Fill in:
 python manage.py runserver
 ```
 
-Visit `http://127.0.0.1:8000/` and log in with your phone number.
-
----
-
-## Twilio webhook setup
-
-Twilio needs to be able to POST inbound SMS messages to your app. For local development, use [ngrok](https://ngrok.com/):
-
-```bash
-ngrok http 8000
-```
-
-Copy the `https://xxxx.ngrok.io` URL. In your [Twilio console](https://console.twilio.com/):
-
-1. Go to **Phone Numbers → Manage → Active Numbers → your number**
-2. Under **Messaging → A message comes in**, set:
-   - **Webhook**: `https://xxxx.ngrok.io/sms/inbound/`
-   - **HTTP method**: `POST`
-
-### Twilio signature validation (production)
-
-The webhook is currently open. For production, add validation by installing `django-twilio` or using Twilio's `RequestValidator` manually. Add this to `twilio_webhook` in `views.py`:
-
-```python
-from twilio.request_validator import RequestValidator
-from django.conf import settings
-
-validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
-url = request.build_absolute_uri()
-signature = request.META.get("HTTP_X_TWILIO_SIGNATURE", "")
-if not validator.validate(url, request.POST, signature):
-    return HttpResponse(status=403)
-```
+Visit `http://127.0.0.1:8000/` and sign in with Google.
 
 ---
 
 ## How the coverage flow works
 
-1. Employee logs in, creates a shift request (date / start / end / notes).
+1. Employee signs in with Google, creates a shift request (date / start / end / notes).
 2. They can **Save as draft** or click **Find coverage**.
-3. On Find coverage, the app finds the employee immediately below the requester in seniority and texts them.
-4. **YES** → both parties get a confirmation text; search ends.
-5. **NO** → requester is notified; next person down the roster is texted.
-6. **UNSURE** → requester is notified; the request simultaneously continues to the next person.
-7. If someone further down says YES while earlier people are still UNSURE, everyone who replied UNSURE (plus the requester) gets a text asking them to finalize with YES or NO.
-8. If the entire roster is exhausted, the request is marked **Uncovered**.
+3. On Find coverage, the app finds the employee immediately below the requester in seniority and sends them an in-app notification with **Yes / No** buttons (shown on their dashboard under "Requests waiting on you").
+4. **Yes** → both parties get a confirmation notification; search ends.
+5. **No** → requester is notified; the next person down the roster is notified.
+6. If the entire roster is exhausted, the request is marked **Uncovered**.
+
+Notifications are delivered by lightweight polling — the header bell in the app polls every 15 seconds for unread items. No push service, WebSockets, or third-party messaging is involved.
 
 All state changes are recorded in the **CoverageEvent** log, visible on the shift request detail page and in the Django admin.
 
@@ -144,7 +116,6 @@ The app defaults to `America/Chicago`. Change `TIME_ZONE` in `settings.py` if ne
 
 ## Stretch goals (not yet built)
 
-- Reminder SMS for UNSURE respondents who haven't resolved
 - Manager admin view showing all open requests across all employees
-- Email/push notification fallback
-- Twilio signature validation middleware
+- Real-time delivery (WebSockets/Channels) instead of polling
+- Email notification fallback
