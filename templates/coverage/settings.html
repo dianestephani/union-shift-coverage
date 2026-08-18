@@ -2,8 +2,8 @@
 {% block title %}Settings – Shift Coverage{% endblock %}
 
 {% block content %}
-<div style="max-width:520px; margin:0 auto;">
-  <h1 style="font-size:1.4rem; margin-bottom:1.25rem;">Settings</h1>
+<div class="narrow-form">
+  <h1 class="page-title mb-lg">Settings</h1>
 
   <div class="card">
     <form method="post">
@@ -22,9 +22,9 @@
       </div>
       {% endfor %}
 
-      <button type="submit" class="btn btn-primary" style="width:100%; margin-top:0.5rem;">Save</button>
+      <button type="submit" class="btn btn-primary full-width mt-sm">Save</button>
 
-      <p style="font-size:0.8rem; color:var(--muted); margin-top:0.75rem; text-align:center;">
+      <p class="text-xs text-muted text-center mt-md">
         This changes the timezone used for timestamps you see in the app — like when a
         notification was sent or a request was answered. It doesn't change the shift
         times themselves; those are always the exact clock time entered on the request.
@@ -32,6 +32,6 @@
     </form>
   </div>
 
-  <a href="{% url 'dashboard' %}" style="font-size:0.875rem; color:var(--muted);">← Back to dashboard</a>
+  <a href="{% url 'dashboard' %}" class="back-link">← Back to dashboard</a>
 </div>
 {% endblock %}

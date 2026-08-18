@@ -127,6 +127,29 @@ class HandleResponseTests(TestCase):
         self.assertEqual(self.sr.current_candidate, dave)
         self.assertTrue(ShiftResponse.objects.filter(shift_request=self.sr, employee=dave).exists())
 
+    def test_skipping_many_already_answered_candidates_does_not_add_queries(self):
+        # _find_next_untried_candidate fetches the remaining roster and the
+        # already-answered set in one query each, then walks them in Python
+        # — so the number of already-declined candidates in front of the
+        # real next one shouldn't change the query count. This is what
+        # actually proves the O(k)-round-trips version is gone, rather than
+        # just asserting on the end result (which the old, slower
+        # implementation would also have gotten right).
+        # Carol (from setUp, rank 3) also needs to be marked as already
+        # answered, otherwise she — not "winner" — would be the correct
+        # next candidate and the assertion below would be testing the
+        # wrong thing.
+        ShiftResponse.objects.create(shift_request=self.sr, employee=self.carol, answer=ShiftResponse.Answer.NO)
+        candidates = [make_employee(f"Skip{i}", seniority_rank=10 + i) for i in range(15)]
+        for c in candidates:
+            ShiftResponse.objects.create(shift_request=self.sr, employee=c, answer=ShiftResponse.Answer.NO)
+        winner = make_employee("Winner", seniority_rank=100)
+
+        with self.assertNumQueries(2):
+            next_candidate = coverage_service._find_next_untried_candidate(self.sr, self.bob)
+
+        self.assertEqual(next_candidate, winner)
+
     def test_rejects_response_to_a_cancelled_request(self):
         # Bob's ask is still PENDING, but Alice cancelled the request out
         # from under him after it went out.

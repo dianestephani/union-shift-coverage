@@ -2,8 +2,8 @@
 {% block title %}New Shift Request – Shift Coverage{% endblock %}
 
 {% block content %}
-<div style="max-width:520px; margin:0 auto;">
-  <h1 style="font-size:1.4rem; margin-bottom:1.25rem;">Request Shift Coverage</h1>
+<div class="narrow-form">
+  <h1 class="page-title mb-lg">Request Shift Coverage</h1>
 
   <div class="card">
     <form method="post">
@@ -22,21 +22,21 @@
       </div>
       {% endfor %}
 
-      <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
-        <button type="submit" name="action" value="save_draft" class="btn btn-outline" style="flex:1;">
+      <div class="button-row mt-xl">
+        <button type="submit" name="action" value="save_draft" class="btn btn-outline flex-1">
           Save as draft
         </button>
-        <button type="submit" name="action" value="find_coverage" class="btn btn-success" style="flex:1;">
+        <button type="submit" name="action" value="find_coverage" class="btn btn-success flex-1">
           Find coverage
         </button>
       </div>
 
-      <p style="font-size:0.8rem; color:var(--muted); margin-top:0.75rem; text-align:center;">
+      <p class="text-xs text-muted text-center mt-md">
         "Find coverage" will immediately notify the roster in-app that you're looking for coverage.
       </p>
     </form>
   </div>
 
-  <a href="{% url 'dashboard' %}" style="font-size:0.875rem; color:var(--muted);">← Back to dashboard</a>
+  <a href="{% url 'dashboard' %}" class="back-link">← Back to dashboard</a>
 </div>
 {% endblock %}

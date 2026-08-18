@@ -82,6 +82,27 @@ class RosterViewTests(TestCase):
         response = self.client.get(reverse("roster"))
         self.assertContains(response, "—")
 
+    def test_roster_paginates_past_page_size(self):
+        from coverage.views.common import PAGE_SIZE
+
+        for i in range(PAGE_SIZE + 5):
+            make_employee(f"Extra{i}", seniority_rank=100 + i)
+
+        self.client.force_login(self.alice.user)
+        page1 = self.client.get(reverse("roster"))
+        self.assertEqual(len(page1.context["employees_page"]), PAGE_SIZE)
+        self.assertContains(page1, "Page 1 of 2")
+
+        page2 = self.client.get(reverse("roster"), {"page": 2})
+        # 3 original employees (Alice/Bob/Carol) + PAGE_SIZE + 5 extras,
+        # minus the PAGE_SIZE already shown on page 1.
+        self.assertEqual(len(page2.context["employees_page"]), 3 + PAGE_SIZE + 5 - PAGE_SIZE)
+
+    def test_roster_single_page_shows_no_pagination_controls(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("roster"))
+        self.assertNotContains(response, "Page 1 of")
+
 
 class SettingsViewTests(TestCase):
     def setUp(self):
@@ -596,6 +617,31 @@ class ShiftRequestCancelViewTests(TestCase):
         self.assertIsNone(matching[0]["action_response_id"])
 
 
+class DashboardPaginationTests(TestCase):
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+
+    def test_shifts_offered_table_paginates(self):
+        from coverage.views.common import PAGE_SIZE
+
+        for i in range(PAGE_SIZE + 3):
+            make_shift_request(self.alice, shift_date=datetime.date(2026, 1, 1) + datetime.timedelta(days=i))
+
+        self.client.force_login(self.alice.user)
+        page1 = self.client.get(reverse("dashboard"))
+        self.assertEqual(len(page1.context["my_requests_page"]), PAGE_SIZE)
+        self.assertContains(page1, "Page 1 of 2")
+
+        page2 = self.client.get(reverse("dashboard"), {"page": 2})
+        self.assertEqual(len(page2.context["my_requests_page"]), 3)
+
+    def test_small_number_of_requests_shows_no_pagination_controls(self):
+        make_shift_request(self.alice)
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertNotContains(response, "Page 1 of")
+
+
 class MyCoverageListsTests(TestCase):
     """Every employee should see their own waiting / covering / declined
     shifts on the dashboard, regardless of who requested them."""
@@ -974,7 +1020,7 @@ class ManagerDashboardTests(TestCase):
 
         self.client.force_login(self.manager.user)
         response = self.client.get(reverse("manager_dashboard"))
-        open_requests = list(response.context["open_requests"])
+        open_requests = list(response.context["open_requests_page"])
         self.assertIn(draft, open_requests)
         self.assertIn(searching, open_requests)
 
@@ -992,7 +1038,7 @@ class ManagerDashboardTests(TestCase):
 
         self.client.force_login(self.manager.user)
         response = self.client.get(reverse("manager_dashboard"))
-        open_requests = list(response.context["open_requests"])
+        open_requests = list(response.context["open_requests_page"])
         self.assertNotIn(covered, open_requests)
         self.assertNotIn(uncovered, open_requests)
 
@@ -1012,6 +1058,22 @@ class ManagerDashboardTests(TestCase):
         self.client.force_login(self.alice.user)
         response = self.client.get(reverse("dashboard"))
         self.assertNotContains(response, reverse("manager_dashboard"))
+
+    def test_open_requests_paginate_with_their_own_query_param(self):
+        from coverage.views.common import PAGE_SIZE
+
+        for i in range(PAGE_SIZE + 4):
+            make_shift_request(
+                self.alice, status=ShiftRequest.Status.DRAFT,
+                shift_date=datetime.date(2026, 1, 1) + datetime.timedelta(days=i),
+            )
+
+        self.client.force_login(self.manager.user)
+        page1 = self.client.get(reverse("manager_dashboard"))
+        self.assertEqual(len(page1.context["open_requests_page"]), PAGE_SIZE)
+
+        page2 = self.client.get(reverse("manager_dashboard"), {"requests_page": 2})
+        self.assertEqual(len(page2.context["open_requests_page"]), 4)
 
 
 class ManagerEmployeeDetailTests(TestCase):
@@ -1037,11 +1099,41 @@ class ManagerEmployeeDetailTests(TestCase):
 
         alice_page = self.client.get(reverse("manager_employee_detail", args=[self.alice.pk]))
         self.assertEqual(alice_page.status_code, 200)
-        self.assertIn(sr, list(alice_page.context["requests"]))
+        self.assertIn(sr, list(alice_page.context["requests_page"]))
 
         bob_page = self.client.get(reverse("manager_employee_detail", args=[self.bob.pk]))
         bob_response = ShiftResponse.objects.get(shift_request=sr, employee=self.bob)
-        self.assertIn(bob_response, list(bob_page.context["responses"]))
+        self.assertIn(bob_response, list(bob_page.context["responses_page"]))
+
+    def test_requests_and_responses_paginate_independently(self):
+        # Both tables live on the SAME page, so they must use different
+        # query-string params — otherwise paging one would silently also
+        # page the other. Give Alice enough of both to prove it.
+        from coverage.views.common import PAGE_SIZE
+
+        for i in range(PAGE_SIZE + 2):
+            make_shift_request(
+                self.alice, shift_date=datetime.date(2026, 1, 1) + datetime.timedelta(days=i)
+            )
+        for i in range(3):
+            # Manny (rank 1) requesting means Alice (rank 2) is asked first.
+            sr = make_shift_request(
+                self.manager, shift_date=datetime.date(2027, 1, 1) + datetime.timedelta(days=i)
+            )
+            coverage_service.start_coverage_search(sr)
+            response = ShiftResponse.objects.get(shift_request=sr, employee=self.alice)
+            coverage_service.handle_response(response, self.alice, "NO")
+
+        self.client.force_login(self.manager.user)
+
+        # Asking for page 2 of Alice's *requests* should leave her
+        # *responses* table on its default (page 1, all 3), not also
+        # advance it or blow up trying to find a "page 2" that doesn't exist.
+        response = self.client.get(
+            reverse("manager_employee_detail", args=[self.alice.pk]), {"requests_page": 2}
+        )
+        self.assertEqual(len(response.context["requests_page"]), 2)
+        self.assertEqual(len(response.context["responses_page"]), 3)
 
     def test_unknown_employee_404s(self):
         self.client.force_login(self.manager.user)

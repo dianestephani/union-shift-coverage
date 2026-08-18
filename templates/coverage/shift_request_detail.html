@@ -3,59 +3,59 @@
 {% block title %}Shift Request #{{ sr.pk }} – Shift Coverage{% endblock %}
 
 {% block content %}
-<div style="margin-bottom:1rem;">
+<div class="mb-md">
   {% if sr.requester_id == employee.id %}
-    <a href="{% url 'dashboard' %}" style="font-size:0.875rem; color:var(--muted);">← Back to dashboard</a>
+    <a href="{% url 'dashboard' %}" class="back-link">← Back to dashboard</a>
   {% else %}
-    <a href="{% url 'manager_employee_detail' sr.requester_id %}" style="font-size:0.875rem; color:var(--muted);">← Back to {{ sr.requester.name }}</a>
+    <a href="{% url 'manager_employee_detail' sr.requester_id %}" class="back-link">← Back to {{ sr.requester.name }}</a>
   {% endif %}
 </div>
 
-<div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:1.25rem;">
-  <h1 style="font-size:1.4rem;">Shift Request #{{ sr.pk }}</h1>
+<div class="header-row">
+  <h1 class="page-title">Shift Request #{{ sr.pk }}</h1>
   <span class="badge badge-{{ sr.status|lower }}">{{ sr.get_status_display }}</span>
 </div>
 
 <!-- Summary card -->
 <div class="card">
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+  <div class="detail-grid">
     {% if sr.requester_id != employee.id %}
-    <div style="grid-column:1/-1;">
-      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Requested by</p>
+    <div class="detail-grid-full">
+      <p class="field-label">Requested by</p>
       <p><strong>{{ sr.requester.name }}</strong></p>
     </div>
     {% endif %}
     <div>
-      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Date</p>
+      <p class="field-label">Date</p>
       <p><strong>{{ sr.day_display }}</strong>, {{ sr.date_display }}</p>
     </div>
     <div>
-      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Time</p>
+      <p class="field-label">Time</p>
       <p>{{ sr.time_display }}</p>
     </div>
     {% if sr.notes %}
-    <div style="grid-column:1/-1;">
-      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Notes</p>
+    <div class="detail-grid-full">
+      <p class="field-label">Notes</p>
       <p>{{ sr.notes }}</p>
     </div>
     {% endif %}
     {% if sr.status == "SEARCHING" and sr.current_candidate %}
-    <div style="grid-column:1/-1;">
-      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Waiting on</p>
-      <p style="font-weight:600;">{{ sr.current_candidate.name }}</p>
+    <div class="detail-grid-full">
+      <p class="field-label">Waiting on</p>
+      <p class="font-semibold">{{ sr.current_candidate.name }}</p>
     </div>
     {% endif %}
     {% if sr.covered_by %}
-    <div style="grid-column:1/-1;">
-      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Covered by</p>
-      <p style="color:var(--success); font-weight:600;">{{ sr.covered_by.name }}</p>
+    <div class="detail-grid-full">
+      <p class="field-label">Covered by</p>
+      <p class="text-success font-semibold">{{ sr.covered_by.name }}</p>
     </div>
     {% endif %}
   </div>
 
   {% if sr.requester_id == employee.id %}
     {% if sr.status == "DRAFT" %}
-    <div style="margin-top:1.25rem; display:flex; gap:0.75rem;">
+    <div class="button-row mt-lg">
       <form method="post" action="{% url 'shift_request_activate' sr.pk %}">
         {% csrf_token %}
         <button type="submit" class="btn btn-success">Find coverage now</button>
@@ -67,7 +67,7 @@
       </form>
     </div>
     {% elif sr.status == "SEARCHING" %}
-    <form method="post" action="{% url 'shift_request_cancel' sr.pk %}" style="margin-top:1.25rem;"
+    <form method="post" action="{% url 'shift_request_cancel' sr.pk %}" class="mt-lg"
           onsubmit="return confirm('Cancel this shift request? Whoever is currently being asked will be notified.');">
       {% csrf_token %}
       <button type="submit" class="btn btn-outline">Cancel request</button>
@@ -93,7 +93,7 @@
     {% for r in responses %}
       <tr>
         <td>{{ r.employee.name }}</td>
-        <td style="font-size:0.85rem; color:var(--muted);">{{ r.asked_at|user_datetime_short }}</td>
+        <td class="text-muted text-sm">{{ r.asked_at|user_datetime_short }}</td>
         <td>
           {% if r.answer == "YES" %}
             <span class="badge badge-covered">{{ r.get_answer_display }}</span>
@@ -103,7 +103,7 @@
             <span class="badge badge-draft">Pending</span>
           {% endif %}
         </td>
-        <td style="font-size:0.85rem; color:var(--muted);">{{ r.answered_at|user_datetime_short|default:"—" }}</td>
+        <td class="text-muted text-sm">{{ r.answered_at|user_datetime_short|default:"—" }}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -122,10 +122,10 @@
     <tbody>
     {% for e in events %}
       <tr>
-        <td style="white-space:nowrap; font-size:0.8rem; color:var(--muted);">{{ e.created_at|user_datetime_short }}</td>
-        <td style="font-size:0.85rem;">{{ e.get_event_type_display }}</td>
-        <td style="font-size:0.85rem;">{{ e.employee.name|default:"—" }}</td>
-        <td style="font-size:0.8rem; color:var(--muted); max-width:260px; word-break:break-word;">{{ e.message|truncatechars:120 }}</td>
+        <td class="text-nowrap text-xs text-muted">{{ e.created_at|user_datetime_short }}</td>
+        <td class="text-sm">{{ e.get_event_type_display }}</td>
+        <td class="text-sm">{{ e.employee.name|default:"—" }}</td>
+        <td class="text-xs text-muted cell-wrap">{{ e.message|truncatechars:120 }}</td>
       </tr>
     {% endfor %}
     </tbody>

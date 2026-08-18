@@ -3,16 +3,16 @@
 {% block title %}Manager Dashboard – Shift Coverage{% endblock %}
 
 {% block content %}
-<div style="margin-bottom:1.25rem;">
-  <h1 style="font-size:1.4rem;">Manager Dashboard</h1>
-  <p style="color:var(--muted); font-size:0.9rem;">
+<div class="mb-lg">
+  <h1 class="page-title">Manager Dashboard</h1>
+  <p class="page-subtitle">
     Every open coverage request, the full roster, and recent activity across the team.
   </p>
 </div>
 
-<h2 style="font-size:1.1rem; margin-bottom:0.75rem;">Open requests <span class="list-count">{{ open_requests|length }}</span></h2>
-<div class="card" style="padding:0; overflow:hidden; margin-bottom:1.5rem;">
-  {% if open_requests %}
+<h2 class="section-title">Open requests <span class="list-count">{{ open_requests_page.paginator.count }}</span></h2>
+<div class="card card-flush mb-xl">
+  {% if open_requests_page %}
   <table>
     <thead>
       <tr>
@@ -25,30 +25,31 @@
       </tr>
     </thead>
     <tbody>
-    {% for sr in open_requests %}
+    {% for sr in open_requests_page %}
       <tr>
         <td>{{ sr.requester.name }}</td>
         <td>
           <strong>{{ sr.day_display }}</strong><br>
-          <span style="color:var(--muted); font-size:0.85rem;">{{ sr.date_display }}</span>
+          <span class="text-muted text-sm">{{ sr.date_display }}</span>
         </td>
         <td>{{ sr.time_display }}</td>
         <td><span class="badge badge-{{ sr.status|lower }}">{{ sr.get_status_display }}</span></td>
         <td>{{ sr.current_candidate.name|default:"—" }}</td>
-        <td style="text-align:right;">
+        <td class="text-right">
           <a href="{% url 'shift_request_detail' sr.pk %}" class="btn btn-outline btn-sm">View</a>
         </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
+  {% include "coverage/_pagination.html" with page_obj=open_requests_page page_param="requests_page" %}
   {% else %}
   <p class="empty">No open requests right now — everything's either covered or hasn't been started.</p>
   {% endif %}
 </div>
 
-<h2 style="font-size:1.1rem; margin-bottom:0.75rem;">Roster <span class="list-count">{{ employees|length }}</span></h2>
-<div class="card" style="padding:0; overflow:hidden; margin-bottom:1.5rem;">
+<h2 class="section-title">Roster <span class="list-count">{{ employees|length }}</span></h2>
+<div class="card card-flush mb-xl">
   {% if employees %}
   <table>
     <thead>
@@ -67,7 +68,7 @@
         <td>#{{ e.seniority_rank }}</td>
         <td>
           {{ e.name }}
-          {% if e.is_manager %}<span style="color:var(--muted); font-size:0.85rem;">(manager)</span>{% endif %}
+          {% if e.is_manager %}<span class="text-muted text-sm">(manager)</span>{% endif %}
         </td>
         <td>{{ e.email|default:"—" }}</td>
         <td>{{ e.phone_number|default:"—" }}</td>
@@ -78,7 +79,7 @@
             <span class="badge badge-draft">Inactive</span>
           {% endif %}
         </td>
-        <td style="text-align:right;">
+        <td class="text-right">
           <a href="{% url 'manager_employee_detail' e.pk %}" class="btn btn-outline btn-sm">History</a>
         </td>
       </tr>
@@ -90,18 +91,18 @@
   {% endif %}
 </div>
 
-<h2 style="font-size:1.1rem; margin-bottom:0.75rem;">Recent activity</h2>
-<div class="card" style="padding:0; overflow:hidden;">
+<h2 class="section-title">Recent activity</h2>
+<div class="card card-flush">
   {% if recent_events %}
   <div class="scroll-list">
     {% for e in recent_events %}
     <div class="list-item">
-      <p style="font-size:0.9rem;">
+      <p class="text-sm">
         <a href="{% url 'shift_request_detail' e.shift_request_id %}">{{ e.get_event_type_display }}</a>
         — {{ e.shift_request.requester.name }}'s shift on {{ e.shift_request.date_display }}
-        {% if e.employee %}<span style="color:var(--muted);">({{ e.employee.name }})</span>{% endif %}
+        {% if e.employee %}<span class="text-muted">({{ e.employee.name }})</span>{% endif %}
       </p>
-      <p style="color:var(--muted); font-size:0.8rem;">{{ e.created_at|user_datetime }}</p>
+      <p class="text-muted text-xs">{{ e.created_at|user_datetime }}</p>
     </div>
     {% endfor %}
   </div>
