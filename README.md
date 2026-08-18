@@ -14,7 +14,7 @@ There are three moving pieces worth understanding before you touch the code:
 
 1. **Employees and seniority.** Every person who can request or give coverage is an `Employee` row with a `seniority_rank` (1 = most senior). This rank is what drives everything — when someone needs coverage, the app asks the *next* person down the list, not everyone at once.
 2. **The coverage state machine.** A shift request moves through a small set of statuses (`DRAFT` → `SEARCHING` → `COVERED` or `UNCOVERED`). All of the logic for what happens on each step lives in one file, `coverage/coverage_service.py`, so you don't have to hunt through views to understand the flow.
-3. **In-app notifications.** Instead of texting or emailing people, the app creates `Notification` rows that show up in a bell icon in the header (polled every 15 seconds) and on a dedicated `/notifications/` page.
+3. **In-app notifications.** Instead of texting or emailing people, the app creates `Notification` rows that show up in a bell icon in the header and on a dedicated `/notifications/` page. Delivery is real-time over a WebSocket (Django Channels) — the moment a notification is created server-side, it's pushed straight to every open tab for that employee, no polling loop involved.
 
 ---
 
@@ -29,25 +29,30 @@ shift_coverage/
 ├── shift_coverage/         # Django project config
 │   ├── settings.py
 │   ├── urls.py
+│   ├── asgi.py               # Routes HTTP to Django as usual, WebSockets to Channels
 │   └── wsgi.py
 ├── coverage/                # The one app that contains all the feature code
 │   ├── models.py            # Employee, ShiftRequest, ShiftResponse, CoverageEvent, Notification
 │   ├── views.py              # Dashboard, roster, shift request forms, respond/notification endpoints
 │   ├── urls.py                # Maps URLs to the views above
-│   ├── forms.py                # The "New shift request" form
-│   ├── admin.py                 # Configures how these models look in /admin/
-│   ├── adapters.py               # Google OAuth signup gating (must match a provisioned Employee)
-│   ├── signals.py                 # Links a new Google-authenticated User to its Employee
-│   ├── notifications.py            # Creates notifications + the message text + retention/cleanup
-│   ├── coverage_service.py          # The state machine — start a search, handle YES/NO
-│   └── tests/                        # Unit tests, one file per area of the app
+│   ├── routing.py              # Maps ws:// URLs to consumers (the WebSocket equivalent of urls.py)
+│   ├── consumers.py             # NotificationConsumer — one per open browser tab
+│   ├── realtime.py               # Shared group-naming + push helper used by notify() and the consumer
+│   ├── forms.py                    # The "New shift request" form
+│   ├── admin.py                     # Configures how these models look in /admin/
+│   ├── adapters.py                   # Google OAuth signup gating (must match a provisioned Employee)
+│   ├── signals.py                     # Links a new Google-authenticated User to its Employee
+│   ├── notifications.py                # Creates notifications + the message text + retention/cleanup
+│   ├── coverage_service.py              # The state machine — start a search, handle YES/NO
+│   └── tests/                            # Unit tests, one file per area of the app
 │       ├── factories.py               # Shortcuts for building test data
 │       ├── test_models.py
 │       ├── test_forms.py
 │       ├── test_views.py
 │       ├── test_coverage_service.py
 │       ├── test_auth_linking.py
-│       └── test_admin.py
+│       ├── test_admin.py
+│       └── test_realtime.py           # WebSocket consumer tests
 └── templates/coverage/       # The actual HTML pages
     ├── base.html               # Shared layout: header, nav, notification bell + dropdown
     ├── dashboard.html            # The homepage after login
@@ -124,6 +129,8 @@ Go to **Employees → Add employee**. Fill in:
 python manage.py runserver
 ```
 
+This looks like the normal Django command, but because `daphne` is listed first in `INSTALLED_APPS`, it actually serves the app over ASGI instead of Django's default WSGI dev server — that's what lets it handle both regular HTTP requests and the WebSocket connection used for real-time notifications, from a single `runserver` command. Nothing else about running it locally changes.
+
 Visit `http://127.0.0.1:8000/` and sign in with Google.
 
 ---
@@ -157,11 +164,18 @@ The dashboard (the homepage after logging in) is organized top to bottom by what
 
 Notifications are how the app tells you something needs your attention — a new coverage request, a confirmation that your shift got covered, or someone declining your request.
 
-- **The bell icon** in the header (visible on every page once logged in) polls the server every 15 seconds for unread notifications and shows a red count badge. Clicking it opens a dropdown where you can respond directly.
+- **The bell icon** in the header (visible on every page once logged in) shows a red count badge and a dropdown where you can respond directly.
 - **The `/notifications/` page** (linked from the header, and from "See all notifications" in the dropdown) shows your full notification history — read and unread — in one place.
+- **Delivery is real-time, not polling.** Each open browser tab opens a WebSocket connection to `/ws/notifications/`. The moment `coverage/notifications.py`'s `notify()` creates a `Notification`, it pushes it straight down that socket to every tab that employee has open — see `coverage/consumers.py` (the server side, one consumer per tab) and `coverage/realtime.py` (the shared "which group does this employee's messages go to" helper both `notify()` and the consumer use). The bell's JavaScript just re-fetches the current state whenever a push arrives, so it can't drift out of sync with the server. If the socket drops (lost wifi, laptop sleep, etc.) it automatically reconnects with backoff, and reconnects immediately when the tab becomes visible again.
 - **Retention:** to keep this from growing forever, notifications are automatically deleted after **24 hours**, and each employee's list is capped at their **10 most recent** notifications — older ones are removed as new ones arrive. This cleanup logic lives in `coverage/notifications.py` (`prune_notifications`), and runs whenever a notification is created or either notification view is loaded.
 
-No push service, WebSockets, or third-party messaging (like the Twilio SMS this project used to use) is involved — it's all polling plus regular page loads.
+### How the real-time plumbing fits together
+
+This uses [Django Channels](https://channels.readthedocs.io/), which extends Django to speak ASGI (Django's normal request/response cycle plus long-lived connections like WebSockets) instead of just WSGI (request/response only). Concretely:
+
+- `shift_coverage/asgi.py` is the entry point: HTTP still goes to Django as normal, but `/ws/notifications/` gets routed to `coverage/consumers.py`'s `NotificationConsumer` instead.
+- A **channel layer** is what lets one part of the app (a view calling `notify()`) hand a message to a completely different part of the app (a consumer holding open a WebSocket in another connection) — think of it as an internal message bus. Locally this uses `channels.layers.InMemoryChannelLayer`, which only works within a single process. **A production deployment running more than one worker process needs a shared backend instead** (`channels_redis`, configured in `shift_coverage/settings.py`'s `CHANNEL_LAYERS` — the swap is commented there).
+- No third-party push service or messaging provider (like the Twilio SMS this project used to use) is involved — it's all your own server talking to your own open browser tabs.
 
 ---
 
@@ -177,6 +191,7 @@ Tests live in `coverage/tests/`, split by what they're testing:
 | `test_views.py` | Every page/endpoint a logged-in employee touches — dashboard, roster, notifications, responding to a request |
 | `test_auth_linking.py` | Google login gating and linking a new login to its Employee record |
 | `test_admin.py` | Smoke tests that each admin page loads without error |
+| `test_realtime.py` | The WebSocket consumer — connection gating, and that `notify()` actually pushes to the right employee (and only that employee) |
 
 Run the whole suite with:
 
@@ -197,6 +212,5 @@ The app defaults to `America/Chicago`. Change `TIME_ZONE` in `shift_coverage/set
 ## Known gaps / stretch goals (not yet built)
 
 - Deactivating an employee (`is_active=False`) stops them from being asked for coverage, but does **not** stop them from logging in — see `coverage/adapters.py`. Worth revisiting if that matters for your use case.
-- Manager admin view showing all open requests across all employees (the Django admin works today, but isn't tailored for this)
-- Real-time delivery (WebSockets/Channels) instead of polling
+- The in-memory channel layer (real-time notifications) only works with a single server process — see the "How the real-time plumbing fits together" note above before deploying with more than one worker.
 - Email notification fallback

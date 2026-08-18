@@ -272,6 +272,39 @@
       .catch(function () {});
   }
 
+  // Real-time delivery: the server pushes over this socket the moment a new
+  // notification is created (see coverage/realtime.py), instead of this tab
+  // checking on a timer. On each push we just re-poll for the full current
+  // state rather than trying to hand-merge one notification into the
+  // dropdown — simpler, and it can't drift out of sync with the server.
+  let socket = null;
+  let reconnectDelay = 1000;
+
+  function connectSocket() {
+    const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+    socket = new WebSocket(scheme + "//" + window.location.host + "/ws/notifications/");
+
+    socket.addEventListener("open", function () {
+      reconnectDelay = 1000;
+      poll(); // resync in case anything happened while disconnected
+    });
+
+    socket.addEventListener("message", function () {
+      poll();
+    });
+
+    socket.addEventListener("close", function () {
+      setTimeout(connectSocket, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    });
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible" && (!socket || socket.readyState === WebSocket.CLOSED)) {
+      connectSocket();
+    }
+  });
+
   function markRead(notifId) {
     return fetch("/notifications/" + notifId + "/read/", {
       method: "POST",
@@ -317,7 +350,7 @@
   });
 
   poll();
-  setInterval(poll, 15000);
+  connectSocket();
 })();
 </script>
 {% endif %}

@@ -8,6 +8,9 @@ DEBUG = config("DEBUG", default=True, cast=bool)
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
 
 INSTALLED_APPS = [
+    # Must be first: this is what makes `manage.py runserver` serve ASGI
+    # (HTTP + WebSockets) via Daphne instead of Django's default WSGI dev server.
+    "daphne",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -20,6 +23,7 @@ INSTALLED_APPS = [
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
     "phonenumber_field",
+    "channels",
     "coverage",
 ]
 
@@ -62,6 +66,18 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "shift_coverage.wsgi.application"
+ASGI_APPLICATION = "shift_coverage.asgi.application"
+
+# In-memory channel layer: fine for local dev (single process) but does NOT
+# work across multiple worker processes. A production deployment running
+# more than one process needs a shared backend instead, e.g. channels_redis:
+#   CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer",
+#                                  "CONFIG": {"hosts": [config("REDIS_URL", default="redis://localhost:6379")]}}}
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    }
+}
 
 DATABASES = {
     "default": {
