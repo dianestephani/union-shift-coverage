@@ -49,14 +49,38 @@ def login_view(request):
 @login_required_employee
 def dashboard(request):
     employee = _get_logged_in_employee(request)
-    my_requests = ShiftRequest.objects.filter(requester=employee).order_by("-created_at")
+    my_requests = ShiftRequest.objects.filter(requester=employee).select_related(
+        "current_candidate", "covered_by"
+    ).order_by("-created_at")
     my_pending_responses = ShiftResponse.objects.filter(
         employee=employee, answer=ShiftResponse.Answer.PENDING
     ).select_related("shift_request", "shift_request__requester")
+    my_covering = ShiftResponse.objects.filter(
+        employee=employee, answer=ShiftResponse.Answer.YES
+    ).select_related("shift_request", "shift_request__requester").order_by("-answered_at")
+    my_declined = ShiftResponse.objects.filter(
+        employee=employee, answer=ShiftResponse.Answer.NO
+    ).select_related("shift_request", "shift_request__requester").order_by("-answered_at")
     return render(request, "coverage/dashboard.html", {
         "employee": employee,
         "my_requests": my_requests,
         "my_pending_responses": my_pending_responses,
+        "my_covering": my_covering,
+        "my_declined": my_declined,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Roster
+# ---------------------------------------------------------------------------
+
+@login_required_employee
+def roster(request):
+    employee = _get_logged_in_employee(request)
+    employees = Employee.objects.all().order_by("seniority_rank")
+    return render(request, "coverage/roster.html", {
+        "employee": employee,
+        "employees": employees,
     })
 
 
@@ -105,7 +129,11 @@ def shift_request_new(request):
 @login_required_employee
 def shift_request_detail(request, pk):
     employee = _get_logged_in_employee(request)
-    sr = get_object_or_404(ShiftRequest, pk=pk, requester=employee)
+    sr = get_object_or_404(
+        ShiftRequest.objects.select_related("current_candidate", "covered_by"),
+        pk=pk,
+        requester=employee,
+    )
     events = sr.events.select_related("employee").order_by("created_at")
     responses = sr.responses.select_related("employee").order_by("asked_at")
     return render(request, "coverage/shift_request_detail.html", {
@@ -143,11 +171,19 @@ def respond_to_shift(request, pk):
     employee = _get_logged_in_employee(request)
     shift_response = get_object_or_404(ShiftResponse, pk=pk, employee=employee)
     answer = request.POST.get("answer", "")
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
     try:
         handle_response(shift_response, employee, answer)
+        Notification.objects.filter(
+            action_response=shift_response, read_at__isnull=True
+        ).update(read_at=timezone.now())
+        if is_ajax:
+            return JsonResponse({"ok": True})
         messages.success(request, "Your response was recorded.")
     except ValueError as exc:
+        if is_ajax:
+            return JsonResponse({"ok": False, "error": str(exc)}, status=400)
         messages.error(request, str(exc))
 
     next_url = request.POST.get("next") or "dashboard"
@@ -165,6 +201,11 @@ def notifications_poll(request):
         employee=employee, read_at__isnull=True
     ).select_related("shift_request", "action_response")
 
+    def actionable_response_id(n):
+        if n.action_response_id and n.action_response.answer == ShiftResponse.Answer.PENDING:
+            return n.action_response_id
+        return None
+
     return JsonResponse({
         "unread_count": unread.count(),
         "notifications": [
@@ -172,7 +213,7 @@ def notifications_poll(request):
                 "id": n.pk,
                 "message": n.message,
                 "shift_request_id": n.shift_request_id,
-                "action_response_id": n.action_response_id,
+                "action_response_id": actionable_response_id(n),
                 "created_at": n.created_at.isoformat(),
             }
             for n in unread[:20]

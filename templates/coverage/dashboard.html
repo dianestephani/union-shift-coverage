@@ -10,32 +10,73 @@
   <a href="{% url 'shift_request_new' %}" class="btn btn-primary">+ New Request</a>
 </div>
 
-{% if my_pending_responses %}
-<div class="card">
-  <h2>Requests waiting on you</h2>
-  {% for r in my_pending_responses %}
-  <div style="padding:0.75rem 0; {% if not forloop.last %}border-bottom:1px solid var(--border);{% endif %}">
-    <p style="margin-bottom:0.6rem;">
-      <strong>{{ r.shift_request.requester.name }}</strong> needs coverage on
-      {{ r.shift_request.day_display }}, {{ r.shift_request.date_display }}
-      ({{ r.shift_request.time_display }}).
-    </p>
-    <form method="post" action="{% url 'respond_to_shift' r.pk %}" style="display:inline;">
-      {% csrf_token %}
-      <input type="hidden" name="next" value="{% url 'dashboard' %}">
-      <input type="hidden" name="answer" value="YES">
-      <button type="submit" class="btn btn-success btn-sm">Yes, I can cover</button>
-    </form>
-    <form method="post" action="{% url 'respond_to_shift' r.pk %}" style="display:inline;">
-      {% csrf_token %}
-      <input type="hidden" name="next" value="{% url 'dashboard' %}">
-      <input type="hidden" name="answer" value="NO">
-      <button type="submit" class="btn btn-outline btn-sm">No, can't make it</button>
-    </form>
+<h2 style="font-size:1.1rem; margin-bottom:0.75rem;">My Coverage Requests</h2>
+<div class="coverage-lists">
+
+  <div class="card">
+    <h2>Waiting on you <span class="list-count">{{ my_pending_responses|length }}</span></h2>
+    <div class="scroll-list">
+      {% for r in my_pending_responses %}
+      <div class="list-item">
+        <p style="margin-bottom:0.6rem; font-size:0.9rem;">
+          <strong>{{ r.shift_request.requester.name }}</strong> needs coverage on
+          {{ r.shift_request.day_display }}, {{ r.shift_request.date_display }}
+          ({{ r.shift_request.time_display }}).
+        </p>
+        <form method="post" action="{% url 'respond_to_shift' r.pk %}" style="display:inline;">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{% url 'dashboard' %}">
+          <input type="hidden" name="answer" value="YES">
+          <button type="submit" class="btn btn-success btn-sm">Yes, I can cover</button>
+        </form>
+        <form method="post" action="{% url 'respond_to_shift' r.pk %}" style="display:inline;">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{% url 'dashboard' %}">
+          <input type="hidden" name="answer" value="NO">
+          <button type="submit" class="btn btn-outline btn-sm">No, can't make it</button>
+        </form>
+      </div>
+      {% empty %}
+      <p class="empty" style="padding:1rem;">Nothing waiting on you.</p>
+      {% endfor %}
+    </div>
   </div>
-  {% endfor %}
+
+  <div class="card">
+    <h2>You're covering <span class="list-count">{{ my_covering|length }}</span></h2>
+    <div class="scroll-list">
+      {% for r in my_covering %}
+      <div class="list-item">
+        <p style="font-size:0.9rem;">
+          <strong>{{ r.shift_request.requester.name }}</strong> —
+          {{ r.shift_request.day_display }}, {{ r.shift_request.date_display }}
+          ({{ r.shift_request.time_display }})
+        </p>
+      </div>
+      {% empty %}
+      <p class="empty" style="padding:1rem;">You're not covering anything right now.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>You declined <span class="list-count">{{ my_declined|length }}</span></h2>
+    <div class="scroll-list">
+      {% for r in my_declined %}
+      <div class="list-item">
+        <p style="font-size:0.9rem;">
+          <strong>{{ r.shift_request.requester.name }}</strong> —
+          {{ r.shift_request.day_display }}, {{ r.shift_request.date_display }}
+          ({{ r.shift_request.time_display }})
+        </p>
+      </div>
+      {% empty %}
+      <p class="empty" style="padding:1rem;">You haven't declined anything.</p>
+      {% endfor %}
+    </div>
+  </div>
+
 </div>
-{% endif %}
 
 <div class="card" style="padding:0; overflow:hidden;">
   {% if my_requests %}
@@ -45,6 +86,7 @@
         <th>Date</th>
         <th>Time</th>
         <th>Status</th>
+        <th>Waiting on</th>
         <th>Covered by</th>
         <th></th>
       </tr>
@@ -59,6 +101,13 @@
         <td>{{ sr.time_display }}</td>
         <td>
           <span class="badge badge-{{ sr.status|lower }}">{{ sr.get_status_display }}</span>
+        </td>
+        <td>
+          {% if sr.status == "SEARCHING" %}
+            {{ sr.current_candidate.name|default:"—" }}
+          {% else %}
+            —
+          {% endif %}
         </td>
         <td>{{ sr.covered_by.name|default:"—" }}</td>
         <td style="text-align:right;">

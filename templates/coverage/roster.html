@@ -1,0 +1,45 @@
+{% extends "coverage/base.html" %}
+{% block title %}Roster – Shift Coverage{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:1.25rem;">
+  <h1 style="font-size:1.4rem;">Roster</h1>
+  <p style="color:var(--muted); font-size:0.9rem;">
+    Coverage requests cascade from the requester down through this list, most senior first.
+  </p>
+</div>
+
+<div class="card" style="padding:0; overflow:hidden;">
+  {% if employees %}
+  <table>
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Name</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for e in employees %}
+      <tr>
+        <td>#{{ e.seniority_rank }}</td>
+        <td>
+          {{ e.name }}
+          {% if e == employee %}<span style="color:var(--muted); font-size:0.85rem;">(you)</span>{% endif %}
+        </td>
+        <td>
+          {% if e.is_active %}
+            <span class="badge badge-covered">Active</span>
+          {% else %}
+            <span class="badge badge-draft">Inactive</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">No employees on the roster yet.</p>
+  {% endif %}
+</div>
+{% endblock %}
