@@ -7,6 +7,14 @@ SECRET_KEY = config("SECRET_KEY", default="change-me-in-production")
 DEBUG = config("DEBUG", default=True, cast=bool)
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
 
+# Render (like Heroku) terminates TLS at its edge and forwards plain HTTP to
+# the app, so without this Django thinks every request is insecure — that
+# breaks CSRF validation and secure cookies on login.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+CSRF_TRUSTED_ORIGINS = [
+    origin for origin in config("CSRF_TRUSTED_ORIGINS", default="").split(",") if origin
+]
+
 INSTALLED_APPS = [
     # Must be first: this is what makes `manage.py runserver` serve ASGI
     # (HTTP + WebSockets) via Daphne instead of Django's default WSGI dev server.
