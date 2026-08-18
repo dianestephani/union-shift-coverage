@@ -16,6 +16,7 @@ urlpatterns = [
     path("responses/<int:pk>/answer/", views.respond_to_shift, name="respond_to_shift"),
 
     # In-app notifications
+    path("notifications/", views.notifications_page, name="notifications_page"),
     path("notifications/poll/", views.notifications_poll, name="notifications_poll"),
     path("notifications/<int:pk>/read/", views.notification_mark_read, name="notification_mark_read"),
 ]

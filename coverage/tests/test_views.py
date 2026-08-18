@@ -3,6 +3,7 @@ import datetime
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from coverage import coverage_service
 from coverage.models import Notification, ShiftRequest, ShiftResponse
@@ -241,6 +242,87 @@ class RespondToShiftViewTests(TestCase):
         self.bob_response.refresh_from_db()
         self.assertEqual(self.bob_response.answer, ShiftResponse.Answer.PENDING)
 
+    def test_non_ajax_invalid_answer_shows_error_message_and_redirects(self):
+        self.client.force_login(self.bob.user)
+        url = reverse("respond_to_shift", args=[self.bob_response.pk])
+        response = self.client.post(url, {"answer": "MAYBE"}, follow=True)
+
+        self.assertRedirects(response, reverse("dashboard"))
+        messages = list(response.context["messages"])
+        self.assertTrue(any("Unrecognised answer" in str(m) for m in messages))
+
+        self.bob_response.refresh_from_db()
+        self.assertEqual(self.bob_response.answer, ShiftResponse.Answer.PENDING)
+
+    def test_non_ajax_double_submit_shows_already_answered_error(self):
+        self.client.force_login(self.bob.user)
+        url = reverse("respond_to_shift", args=[self.bob_response.pk])
+        self.client.post(url, {"answer": "YES"})
+
+        response = self.client.post(url, {"answer": "NO"}, follow=True)
+        messages = list(response.context["messages"])
+        self.assertTrue(any("already been answered" in str(m) for m in messages))
+
+        self.bob_response.refresh_from_db()
+        self.assertEqual(self.bob_response.answer, ShiftResponse.Answer.YES)
+
+    def test_missing_answer_field_is_treated_as_invalid(self):
+        self.client.force_login(self.bob.user)
+        url = reverse("respond_to_shift", args=[self.bob_response.pk])
+        response = self.client.post(url, {}, follow=True)
+
+        messages = list(response.context["messages"])
+        self.assertTrue(any("Unrecognised answer" in str(m) for m in messages))
+
+        self.bob_response.refresh_from_db()
+        self.assertEqual(self.bob_response.answer, ShiftResponse.Answer.PENDING)
+
+
+class ShiftRequestActivateViewTests(TestCase):
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+        self.bob = make_employee("Bob", seniority_rank=2)
+        self.sr = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+
+    def test_owner_can_activate_a_draft(self):
+        self.client.force_login(self.alice.user)
+        url = reverse("shift_request_activate", args=[self.sr.pk])
+        response = self.client.post(url)
+
+        self.assertRedirects(response, reverse("shift_request_detail", args=[self.sr.pk]))
+        self.sr.refresh_from_db()
+        self.assertEqual(self.sr.status, ShiftRequest.Status.SEARCHING)
+        self.assertEqual(self.sr.current_candidate, self.bob)
+
+    def test_get_request_does_not_activate(self):
+        self.client.force_login(self.alice.user)
+        url = reverse("shift_request_activate", args=[self.sr.pk])
+        response = self.client.get(url)
+
+        self.assertRedirects(response, reverse("shift_request_detail", args=[self.sr.pk]))
+        self.sr.refresh_from_db()
+        self.assertEqual(self.sr.status, ShiftRequest.Status.DRAFT)
+
+    def test_non_draft_request_404s(self):
+        self.sr.status = ShiftRequest.Status.SEARCHING
+        self.sr.save(update_fields=["status"])
+
+        self.client.force_login(self.alice.user)
+        url = reverse("shift_request_activate", args=[self.sr.pk])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_non_owner_gets_404(self):
+        self.client.force_login(self.bob.user)
+        url = reverse("shift_request_activate", args=[self.sr.pk])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 404)
+
+    def test_anonymous_user_redirected_to_login(self):
+        url = reverse("shift_request_activate", args=[self.sr.pk])
+        response = self.client.post(url)
+        self.assertRedirects(response, reverse("login"))
+
 
 class MyCoverageListsTests(TestCase):
     """Every employee should see their own waiting / covering / declined
@@ -328,6 +410,26 @@ class NotificationEndpointTests(TestCase):
         url = reverse("notification_mark_read", args=[self.notification.pk])
         self.client.post(url)
 
+    def test_mark_read_redirects_to_next_when_provided(self):
+        self.client.force_login(self.bob.user)
+        url = reverse("notification_mark_read", args=[self.notification.pk])
+        response = self.client.post(url, {"next": reverse("notifications_page")})
+        self.assertRedirects(response, reverse("notifications_page"))
+
+        self.notification.refresh_from_db()
+        self.assertIsNotNone(self.notification.read_at)
+
+    def test_marking_an_already_read_notification_again_is_a_noop(self):
+        self.client.force_login(self.bob.user)
+        url = reverse("notification_mark_read", args=[self.notification.pk])
+        self.client.post(url)
+        self.notification.refresh_from_db()
+        first_read_at = self.notification.read_at
+
+        self.client.post(url)
+        self.notification.refresh_from_db()
+        self.assertEqual(self.notification.read_at, first_read_at)
+
     def test_answering_marks_its_notification_read_without_a_client_followup(self):
         # The client is expected to call notification_mark_read after a
         # successful answer, but the server must not depend on that
@@ -391,6 +493,66 @@ class NotificationEndpointTests(TestCase):
         self.assertIsNotNone(self.notification.read_at)
 
 
+class NotificationsPageTests(TestCase):
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+        self.bob = make_employee("Bob", seniority_rank=2)
+        self.sr = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(self.sr)
+        self.notification = Notification.objects.get(employee=self.bob, shift_request=self.sr)
+
+    def test_anonymous_user_redirected_to_login(self):
+        response = self.client.get(reverse("notifications_page"))
+        self.assertRedirects(response, reverse("login"))
+
+    def test_lists_notifications_for_logged_in_employee(self):
+        self.client.force_login(self.bob.user)
+        response = self.client.get(reverse("notifications_page"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "is looking for shift coverage")
+
+    def test_does_not_leak_other_employees_notifications(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("notifications_page"))
+        self.assertNotContains(response, "is looking for shift coverage")
+
+
+class NotificationRetentionTests(TestCase):
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+        self.bob = make_employee("Bob", seniority_rank=2)
+        self.sr = make_shift_request(self.alice)
+
+    def test_notifications_older_than_24h_are_pruned(self):
+        from coverage.notifications import notify
+
+        old = notify(self.bob, self.sr, "old notification")
+        Notification.objects.filter(pk=old.pk).update(
+            created_at=timezone.now() - datetime.timedelta(hours=25)
+        )
+
+        self.client.force_login(self.bob.user)
+        response = self.client.get(reverse("notifications_page"))
+
+        self.assertFalse(Notification.objects.filter(pk=old.pk).exists())
+        self.assertNotContains(response, "old notification")
+
+    def test_only_10_most_recent_notifications_are_kept(self):
+        from coverage.notifications import notify
+
+        for i in range(12):
+            notify(self.bob, self.sr, f"notification {i}")
+
+        self.assertEqual(Notification.objects.filter(employee=self.bob).count(), 10)
+        remaining_messages = set(
+            Notification.objects.filter(employee=self.bob).values_list("message", flat=True)
+        )
+        self.assertEqual(
+            remaining_messages,
+            {f"notification {i}" for i in range(2, 12)},
+        )
+
+
 class ShiftRequestFlowTests(TestCase):
     def setUp(self):
         self.alice = make_employee("Alice", seniority_rank=1)
@@ -434,3 +596,16 @@ class ShiftRequestFlowTests(TestCase):
         self.client.force_login(self.bob.user)
         response = self.client.get(reverse("shift_request_detail", args=[sr.pk]))
         self.assertEqual(response.status_code, 404)
+
+    def test_invalid_post_rerenders_form_with_errors(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.post(reverse("shift_request_new"), {
+            "shift_date": "",
+            "start_time": "09:00",
+            "end_time": "17:00",
+            "notes": "",
+            "action": "save_draft",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["form"].errors)
+        self.assertFalse(ShiftRequest.objects.filter(requester=self.alice).exists())

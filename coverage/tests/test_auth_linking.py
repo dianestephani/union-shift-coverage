@@ -41,6 +41,18 @@ class SocialAccountAdapterTests(TestCase):
         # normal login, not a signup — no employee lookup needed/possible.
         self.adapter.pre_social_login(None, fake_sociallogin("whatever@example.com", is_existing=True))
 
+    def test_currently_allows_login_for_an_inactive_employee(self):
+        # Pinning current behavior: the adapter only checks that an Employee
+        # row exists with this email — it does not check is_active. If
+        # deactivated employees should be blocked from logging in, this is
+        # the test that should start failing (and the adapter should filter
+        # on is_active=True too).
+        Employee.objects.create(
+            name="Alice", email="alice@example.com", seniority_rank=1, is_active=False
+        )
+        # Should not raise.
+        self.adapter.pre_social_login(None, fake_sociallogin("alice@example.com"))
+
 
 class LinkEmployeeToUserSignalTests(TestCase):
     def test_links_matching_employee_by_email(self):
@@ -68,3 +80,18 @@ class LinkEmployeeToUserSignalTests(TestCase):
         user = User.objects.create_user(username="nobody", email="nobody@example.com")
         # Should not raise even though no Employee exists.
         link_employee_to_user(sender=None, request=None, user=user)
+
+    def test_blank_email_is_a_noop(self):
+        user = User.objects.create_user(username="blank", email="")
+        # Should not raise and must not link to any employee.
+        link_employee_to_user(sender=None, request=None, user=user)
+        self.assertFalse(Employee.objects.filter(user=user).exists())
+
+    def test_matches_case_insensitively(self):
+        employee = Employee.objects.create(name="Alice", email="Alice@Example.com", seniority_rank=1)
+        user = User.objects.create_user(username="alice", email="alice@example.com")
+
+        link_employee_to_user(sender=None, request=None, user=user)
+
+        employee.refresh_from_db()
+        self.assertEqual(employee.user, user)

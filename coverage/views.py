@@ -9,6 +9,7 @@ from django.views.decorators.http import require_POST
 from .coverage_service import handle_response, start_coverage_search
 from .forms import ShiftRequestForm
 from .models import CoverageEvent, Employee, Notification, ShiftRequest, ShiftResponse
+from .notifications import prune_notifications
 
 logger = logging.getLogger(__name__)
 
@@ -195,8 +196,22 @@ def respond_to_shift(request, pk):
 # ---------------------------------------------------------------------------
 
 @login_required_employee
+def notifications_page(request):
+    employee = _get_logged_in_employee(request)
+    prune_notifications(employee)
+    notifications = Notification.objects.filter(employee=employee).select_related(
+        "shift_request", "shift_request__requester", "action_response"
+    )
+    return render(request, "coverage/notifications.html", {
+        "employee": employee,
+        "notifications": notifications,
+    })
+
+
+@login_required_employee
 def notifications_poll(request):
     employee = _get_logged_in_employee(request)
+    prune_notifications(employee)
     unread = Notification.objects.filter(
         employee=employee, read_at__isnull=True
     ).select_related("shift_request", "action_response")
@@ -228,4 +243,7 @@ def notification_mark_read(request, pk):
     Notification.objects.filter(pk=pk, employee=employee, read_at__isnull=True).update(
         read_at=timezone.now()
     )
+    next_url = request.POST.get("next")
+    if next_url:
+        return redirect(next_url)
     return JsonResponse({"ok": True})

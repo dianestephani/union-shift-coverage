@@ -2,8 +2,8 @@ import datetime
 
 from django.test import TestCase
 
-from coverage.models import ShiftRequest
-from .factories import make_employee
+from coverage.models import CoverageEvent, Notification, ShiftRequest, ShiftResponse
+from .factories import make_employee, make_shift_request
 
 
 class EmployeeRosterTests(TestCase):
@@ -35,3 +35,45 @@ class ShiftRequestDisplayTests(TestCase):
         self.assertEqual(sr.date_display(), "August 20, 2026")
         self.assertEqual(sr.time_display(), "9:00 AM–5:30 PM")
         self.assertEqual(sr.status, ShiftRequest.Status.DRAFT)
+
+
+class StrMethodTests(TestCase):
+    """
+    __str__ output backs the admin's list_display columns and log
+    readability — a broken __str__ (e.g. a bad f-string) throws on every
+    admin page load, so it's worth pinning.
+    """
+
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+        self.bob = make_employee("Bob", seniority_rank=2)
+        self.sr = make_shift_request(self.alice)
+
+    def test_employee_str(self):
+        self.assertEqual(str(self.alice), "#1 Alice")
+
+    def test_employee_get_phone_e164_with_no_number(self):
+        self.assertEqual(self.alice.get_phone_e164(), "None")
+
+    def test_shift_request_str(self):
+        self.assertIn(f"ShiftRequest #{self.sr.pk}", str(self.sr))
+        self.assertIn("Alice", str(self.sr))
+
+    def test_shift_response_str(self):
+        response = ShiftResponse.objects.create(shift_request=self.sr, employee=self.bob)
+        self.assertIn("Bob", str(response))
+        self.assertIn("PENDING", str(response))
+
+    def test_coverage_event_str(self):
+        event = CoverageEvent.objects.create(
+            shift_request=self.sr, event_type=CoverageEvent.EventType.REQUEST_CREATED
+        )
+        self.assertIn("REQUEST_CREATED", str(event))
+        self.assertIn(f"ShiftRequest #{self.sr.pk}", str(event))
+
+    def test_notification_str(self):
+        notification = Notification.objects.create(
+            employee=self.bob, shift_request=self.sr, message="Hello there, this is a long message"
+        )
+        self.assertIn("Bob", str(notification))
+        self.assertIn("Hello there, this is a", str(notification))
