@@ -23,6 +23,20 @@ class EmployeeRosterTests(TestCase):
         self.assertIsNone(self.dave.get_next_in_roster())
 
 
+class EmployeeDefaultsTests(TestCase):
+    def test_new_employee_is_not_a_manager_by_default(self):
+        # Managers must be granted explicitly (e.g. via the admin) — an
+        # employee should never accidentally get access to everyone else's
+        # requests and history just by being created.
+        employee = make_employee("Alice", seniority_rank=1)
+        self.assertFalse(employee.is_manager)
+
+    def test_new_employee_defaults_to_12h_time_and_central(self):
+        employee = make_employee("Alice", seniority_rank=1)
+        self.assertFalse(employee.military_time)
+        self.assertEqual(employee.timezone, "America/Chicago")
+
+
 class ShiftRequestDisplayTests(TestCase):
     def test_display_helpers(self):
         requester = make_employee("Alice", seniority_rank=1)

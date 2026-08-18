@@ -454,6 +454,19 @@ class ShiftRequestActivateViewTests(TestCase):
         response = self.client.post(url)
         self.assertEqual(response.status_code, 404)
 
+    def test_manager_still_cannot_activate_someone_elses_draft(self):
+        # Managers can *view* every request (see shift_request_detail), but
+        # starting a coverage search is the requester's own call to make —
+        # that elevated access shouldn't extend to taking actions for them.
+        manager = make_employee("Manny", seniority_rank=3, is_manager=True)
+        self.client.force_login(manager.user)
+        url = reverse("shift_request_activate", args=[self.sr.pk])
+        response = self.client.post(url)
+        self.assertEqual(response.status_code, 404)
+
+        self.sr.refresh_from_db()
+        self.assertEqual(self.sr.status, ShiftRequest.Status.DRAFT)
+
     def test_anonymous_user_redirected_to_login(self):
         url = reverse("shift_request_activate", args=[self.sr.pk])
         response = self.client.post(url)
@@ -911,3 +924,25 @@ class ManagerEmployeeDetailTests(TestCase):
         self.client.force_login(self.manager.user)
         response = self.client.get(reverse("manager_employee_detail", args=[99999]))
         self.assertEqual(response.status_code, 404)
+
+    def test_shows_profile_fields(self):
+        self.client.force_login(self.manager.user)
+        response = self.client.get(reverse("manager_employee_detail", args=[self.alice.pk]))
+        self.assertContains(response, "Alice")
+        self.assertContains(response, "alice@example.com")
+        self.assertContains(response, "#2")  # seniority rank
+        self.assertContains(response, "Central Time")  # get_timezone_display default
+
+    def test_shows_empty_states_for_employee_with_no_history(self):
+        self.client.force_login(self.manager.user)
+        response = self.client.get(reverse("manager_employee_detail", args=[self.alice.pk]))
+        self.assertContains(response, "hasn't requested any coverage")
+        self.assertContains(response, "hasn't been asked to cover anything")
+
+    def test_hides_find_coverage_button_on_someone_elses_request(self):
+        # A manager viewing Alice's draft via the shared detail page
+        # shouldn't be offered a button to activate it on her behalf.
+        sr = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        self.client.force_login(self.manager.user)
+        response = self.client.get(reverse("shift_request_detail", args=[sr.pk]))
+        self.assertNotContains(response, "Find coverage now")

@@ -4,7 +4,7 @@ from channels.db import database_sync_to_async
 from channels.testing import WebsocketCommunicator
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
-from django.test import TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 
 from coverage.consumers import NotificationConsumer
 from coverage.notifications import notify
@@ -96,3 +96,48 @@ class NotificationConsumerTests(TransactionTestCase):
         self.assertEqual(data["message"], "Alice needs coverage")
         self.assertEqual(data["unread_count"], 1)
         await communicator.disconnect()
+
+
+class WebSocketRoutingTests(TransactionTestCase):
+    """
+    Every test above talks to NotificationConsumer directly, which skips
+    coverage/routing.py entirely. This exercises the real thing: the actual
+    ASGI application (shift_coverage/asgi.py), through its real URLRouter,
+    the same way Daphne dispatches an incoming connection in production.
+    """
+
+    async def test_ws_notifications_path_resolves_and_rejects_anonymous(self):
+        from shift_coverage.asgi import application
+
+        communicator = WebsocketCommunicator(application, "/ws/notifications/")
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+        await communicator.disconnect()
+
+
+class PushNotificationChannelLayerTests(TestCase):
+    """
+    push_notification() must degrade gracefully if there's no channel layer
+    configured at all — e.g. the app running under a plain WSGI server with
+    Channels not set up. This isn't a scenario that comes up when running
+    the test suite normally (CHANNEL_LAYERS is always configured in
+    settings), so it has to be forced with override_settings.
+    """
+
+    @override_settings(CHANNEL_LAYERS={})
+    def test_push_notification_is_a_noop_without_a_channel_layer(self):
+        # Should not raise.
+        push_notification(1, {"message": "hello"})
+
+    @override_settings(CHANNEL_LAYERS={})
+    def test_notify_still_creates_the_notification_without_a_channel_layer(self):
+        from coverage.models import Notification
+
+        alice = make_employee("Alice", seniority_rank=1)
+        bob = make_employee("Bob", seniority_rank=2)
+        sr = make_shift_request(alice)
+
+        # Should not raise even though there's nowhere to push the message.
+        notification = notify(bob, sr, "hi")
+
+        self.assertTrue(Notification.objects.filter(pk=notification.pk).exists())

@@ -15,6 +15,7 @@ There are three moving pieces worth understanding before you touch the code:
 1. **Employees and seniority.** Every person who can request or give coverage is an `Employee` row with a `seniority_rank` (1 = most senior). This rank is what drives everything — when someone needs coverage, the app asks the *next* person down the list, not everyone at once.
 2. **The coverage state machine.** A shift request moves through a small set of statuses (`DRAFT` → `SEARCHING` → `COVERED` or `UNCOVERED`). All of the logic for what happens on each step lives in one file, `coverage/coverage_service.py`, so you don't have to hunt through views to understand the flow.
 3. **In-app notifications.** Instead of texting or emailing people, the app creates `Notification` rows that show up in a bell icon in the header and on a dedicated `/notifications/` page. Delivery is real-time over a WebSocket (Django Channels) — the moment a notification is created server-side, it's pushed straight to every open tab for that employee, no polling loop involved.
+4. **Two roles, one model.** There's no separate "manager" account type — a manager is just an `Employee` with `is_manager=True`, granted through the admin. That one flag is what unlocks the extra manager dashboard and view-any-request access described below; everything else about how they use the app is identical to anyone else.
 
 ---
 
@@ -33,12 +34,16 @@ shift_coverage/
 │   └── wsgi.py
 ├── coverage/                # The one app that contains all the feature code
 │   ├── models.py            # Employee, ShiftRequest, ShiftResponse, CoverageEvent, Notification
-│   ├── views.py              # Dashboard, roster, shift request forms, respond/notification endpoints
+│   ├── views.py              # Dashboard, roster, manager views, shift request forms, respond/notification endpoints
 │   ├── urls.py                # Maps URLs to the views above
 │   ├── routing.py              # Maps ws:// URLs to consumers (the WebSocket equivalent of urls.py)
 │   ├── consumers.py             # NotificationConsumer — one per open browser tab
 │   ├── realtime.py               # Shared group-naming + push helper used by notify() and the consumer
-│   ├── forms.py                    # The "New shift request" form
+│   ├── middleware.py              # Activates each employee's timezone + time-format preference per request
+│   ├── time_format.py              # The 12h/24h preference itself (a contextvar, same pattern as Django's own timezone.activate())
+│   ├── templatetags/
+│   │   └── coverage_extras.py       # Template filters that format timestamps per the active preferences
+│   ├── forms.py                    # ShiftRequestForm + EmployeeSettingsForm
 │   ├── admin.py                     # Configures how these models look in /admin/
 │   ├── adapters.py                   # Google OAuth signup gating (must match a provisioned Employee)
 │   ├── signals.py                     # Links a new Google-authenticated User to its Employee
@@ -56,7 +61,10 @@ shift_coverage/
 └── templates/coverage/       # The actual HTML pages
     ├── base.html               # Shared layout: header, nav, notification bell + dropdown
     ├── dashboard.html            # The homepage after login
-    ├── roster.html                 # List of everyone in the seniority order
+    ├── roster.html                 # List of everyone in the seniority order, with contact info
+    ├── settings.html                # Per-employee preferences: timezone, 12h/24h time
+    ├── manager_dashboard.html        # Manager-only: every open request, the roster, recent activity
+    ├── manager_employee_detail.html   # Manager-only: one employee's full request/response history
     ├── notifications.html           # The dedicated notifications page
     ├── shift_request_form.html       # "New shift request" form
     ├── shift_request_detail.html      # One shift request's full history
@@ -121,7 +129,9 @@ Go to **Employees → Add employee**. Fill in:
 - **Email** – must match the Google account the employee will sign in with; a Google login with no matching employee email is rejected before an account is ever created (see `coverage/adapters.py`)
 - **Seniority rank** – `1` = most senior. Coverage requests cascade from the requester toward higher numbers (less senior)
 - **Is active** – uncheck to remove someone from the rotation without deleting them. Note: this only skips them when the app is *choosing who to ask next* — it does not currently block them from logging in.
-- **Phone number** – optional, kept only as a contact field (no longer used for login or delivery)
+- **Is manager** – gives them the [manager dashboard](#manager-dashboard) and lets them view any employee's request/response history. Off by default; check it for whoever should have that access (e.g. yourself).
+- **Phone number** – optional, kept only as a contact field (no longer used for login or delivery). Shows up on the roster page for other employees to see.
+- **Timezone** / **Military time** – each employee's own display preferences; they can change these themselves later from [Settings](#settings) once logged in, so you don't need to set them up front.
 
 ### 6. Run the dev server
 
@@ -160,6 +170,39 @@ The dashboard (the homepage after logging in) is organized top to bottom by what
 
 ---
 
+## Roster
+
+`/roster/` lists everyone in seniority order — the same order coverage requests cascade through — along with each person's email, phone number (`—` if they haven't given one), and active/inactive status. Any logged-in employee can see this; it's meant to answer "who's more senior than me, and how do I reach them" without digging through the admin.
+
+---
+
+## Settings
+
+`/settings/` lets each employee control how the app displays things *to them* — it doesn't affect anything anyone else sees. Two preferences, both on the `Employee` model:
+
+- **Timezone** — a dropdown of common IANA timezones (defaults to `America/Chicago`, the app's overall default). This affects *timestamps* — when a notification was sent, when a request was answered — not the shift's actual start/end time. A shift's time is entered as a plain clock time (e.g. "9:00 AM") with no timezone attached, so it always displays exactly as entered, regardless of who's viewing it.
+- **24-hour time** — toggles `2:00 PM` vs `14:00` everywhere a time is shown, including shift start/end times.
+
+Both preferences are applied by `coverage/middleware.py`'s `EmployeePreferencesMiddleware`, which runs on every request for a logged-in employee: it calls Django's own `timezone.activate()` for the timezone, and sets a small custom contextvar (`coverage/time_format.py`, deliberately mirroring how `timezone.activate()` works) for the 12h/24h choice. `ShiftRequest.time_display()` reads that contextvar directly; everywhere else a timestamp is shown, it goes through the `user_datetime` / `user_datetime_short` template filters in `coverage/templatetags/coverage_extras.py` so both preferences are honored consistently instead of only affecting shift times.
+
+---
+
+## Manager dashboard
+
+Some employees are managers (`Employee.is_manager`, granted via the admin — not tied to Django's own `is_staff`/superuser flag, which is a separate concept for backend admin access). A manager gets an extra **Manager** link in the nav, leading to `/manager/`:
+
+- **Open requests** — every request across *all* employees that's still `DRAFT` or `SEARCHING`, with a link into full detail.
+- **Roster** — same as the public roster page, plus a "History" link per person.
+- **Recent activity** — the last 25 `CoverageEvent` entries system-wide.
+
+Clicking "History" on anyone goes to `/manager/employees/<id>/` — their profile info plus every request they've ever made and every coverage response they've ever given, regardless of status.
+
+A manager can also open *any* request's detail page (`/request/<id>/`), not just their own — that view checks `sr.requester_id == employee.id or employee.is_manager`. They can't take actions on someone else's request on their behalf, though (no "Find coverage now" button shows up there) — starting a search is still the requester's own call.
+
+Non-managers hitting `/manager/...` URLs directly get a 404, not a 403 — the same "don't reveal it exists" pattern used elsewhere in the app (e.g. trying to view someone else's shift request).
+
+---
+
 ## Notifications
 
 Notifications are how the app tells you something needs your attention — a new coverage request, a confirmation that your shift got covered, or someone declining your request.
@@ -186,9 +229,9 @@ Tests live in `coverage/tests/`, split by what they're testing:
 | File | What it covers |
 |---|---|
 | `test_models.py` | Model behavior — display helpers, `__str__` output, roster ordering |
-| `test_forms.py` | The shift request form's validation rules |
+| `test_forms.py` | Form validation rules — the shift request form (date/time sanity checks) and the settings form (valid timezone choices, the 24h checkbox) |
 | `test_coverage_service.py` | The state machine — starting a search, handling YES/NO, edge cases like an exhausted roster |
-| `test_views.py` | Every page/endpoint a logged-in employee touches — dashboard, roster, notifications, responding to a request |
+| `test_views.py` | Every page/endpoint a logged-in employee touches — dashboard, roster, settings, notifications, responding to a request — plus the manager dashboard and per-employee history pages, and that the timezone/time-format middleware activates correctly |
 | `test_auth_linking.py` | Google login gating and linking a new login to its Employee record |
 | `test_admin.py` | Smoke tests that each admin page loads without error |
 | `test_realtime.py` | The WebSocket consumer — connection gating, and that `notify()` actually pushes to the right employee (and only that employee) |
@@ -205,7 +248,7 @@ A couple of tests are intentionally named `test_..._is_currently_accepted` (for 
 
 ## Timezone
 
-The app defaults to `America/Chicago`. Change `TIME_ZONE` in `shift_coverage/settings.py` if needed.
+`shift_coverage/settings.py`'s `TIME_ZONE` is the app-wide fallback — what an anonymous request gets, and what a new employee's `timezone` field defaults to. See [Settings](#settings) for how individual employees override it for themselves.
 
 ---
 

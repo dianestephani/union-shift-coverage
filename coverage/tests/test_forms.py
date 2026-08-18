@@ -3,7 +3,8 @@ import datetime
 from django.test import TestCase
 from django.utils import timezone
 
-from coverage.forms import ShiftRequestForm
+from coverage.forms import EmployeeSettingsForm, ShiftRequestForm
+from .factories import make_employee
 
 
 class ShiftRequestFormTests(TestCase):
@@ -69,3 +70,45 @@ class ShiftRequestFormTests(TestCase):
     def test_todays_date_is_accepted(self):
         form = ShiftRequestForm(self.valid_data(shift_date=timezone.localdate().isoformat()))
         self.assertTrue(form.is_valid(), form.errors)
+
+
+class EmployeeSettingsFormTests(TestCase):
+    def setUp(self):
+        self.employee = make_employee("Alice", seniority_rank=1)
+
+    def test_valid_timezone_choice_passes(self):
+        form = EmployeeSettingsForm(
+            {"timezone": "Asia/Tokyo", "military_time": ""}, instance=self.employee
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_unknown_timezone_is_rejected(self):
+        form = EmployeeSettingsForm(
+            {"timezone": "Mars/Olympus_Mons", "military_time": ""}, instance=self.employee
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("timezone", form.errors)
+
+    def test_missing_timezone_is_rejected(self):
+        form = EmployeeSettingsForm({"military_time": ""}, instance=self.employee)
+        self.assertFalse(form.is_valid())
+        self.assertIn("timezone", form.errors)
+
+    def test_military_time_checkbox_absent_means_false(self):
+        form = EmployeeSettingsForm({"timezone": "America/Chicago"}, instance=self.employee)
+        self.assertTrue(form.is_valid(), form.errors)
+        saved = form.save()
+        self.assertFalse(saved.military_time)
+
+    def test_military_time_checked_means_true(self):
+        form = EmployeeSettingsForm(
+            {"timezone": "America/Chicago", "military_time": "on"}, instance=self.employee
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        saved = form.save()
+        self.assertTrue(saved.military_time)
+
+    def test_only_declared_fields_are_editable(self):
+        # Guard against someone widening Meta.fields to something that would
+        # let this form touch seniority_rank, is_manager, etc.
+        self.assertEqual(set(EmployeeSettingsForm.Meta.fields), {"timezone", "military_time"})
