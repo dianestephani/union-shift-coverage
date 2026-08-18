@@ -3,6 +3,7 @@ import datetime
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from coverage import coverage_service
 from coverage.models import Notification, ShiftRequest, ShiftResponse
@@ -389,6 +390,66 @@ class NotificationEndpointTests(TestCase):
         # The one actually tied to the answered response should be read.
         self.notification.refresh_from_db()
         self.assertIsNotNone(self.notification.read_at)
+
+
+class NotificationsPageTests(TestCase):
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+        self.bob = make_employee("Bob", seniority_rank=2)
+        self.sr = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(self.sr)
+        self.notification = Notification.objects.get(employee=self.bob, shift_request=self.sr)
+
+    def test_anonymous_user_redirected_to_login(self):
+        response = self.client.get(reverse("notifications_page"))
+        self.assertRedirects(response, reverse("login"))
+
+    def test_lists_notifications_for_logged_in_employee(self):
+        self.client.force_login(self.bob.user)
+        response = self.client.get(reverse("notifications_page"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "is looking for shift coverage")
+
+    def test_does_not_leak_other_employees_notifications(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("notifications_page"))
+        self.assertNotContains(response, "is looking for shift coverage")
+
+
+class NotificationRetentionTests(TestCase):
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+        self.bob = make_employee("Bob", seniority_rank=2)
+        self.sr = make_shift_request(self.alice)
+
+    def test_notifications_older_than_24h_are_pruned(self):
+        from coverage.notifications import notify
+
+        old = notify(self.bob, self.sr, "old notification")
+        Notification.objects.filter(pk=old.pk).update(
+            created_at=timezone.now() - datetime.timedelta(hours=25)
+        )
+
+        self.client.force_login(self.bob.user)
+        response = self.client.get(reverse("notifications_page"))
+
+        self.assertFalse(Notification.objects.filter(pk=old.pk).exists())
+        self.assertNotContains(response, "old notification")
+
+    def test_only_10_most_recent_notifications_are_kept(self):
+        from coverage.notifications import notify
+
+        for i in range(12):
+            notify(self.bob, self.sr, f"notification {i}")
+
+        self.assertEqual(Notification.objects.filter(employee=self.bob).count(), 10)
+        remaining_messages = set(
+            Notification.objects.filter(employee=self.bob).values_list("message", flat=True)
+        )
+        self.assertEqual(
+            remaining_messages,
+            {f"notification {i}" for i in range(2, 12)},
+        )
 
 
 class ShiftRequestFlowTests(TestCase):

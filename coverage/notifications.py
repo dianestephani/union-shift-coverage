@@ -3,7 +3,14 @@ In-app notification helpers.
 All notification text lives here so it's easy to edit.
 """
 
+from datetime import timedelta
+
+from django.utils import timezone
+
 from .models import Employee, Notification, ShiftRequest, ShiftResponse
+
+NOTIFICATION_RETENTION = timedelta(hours=24)
+MAX_NOTIFICATIONS_PER_EMPLOYEE = 10
 
 
 def notify(
@@ -13,12 +20,25 @@ def notify(
     action_response: ShiftResponse | None = None,
 ) -> Notification:
     """Create an in-app notification for `employee`."""
-    return Notification.objects.create(
+    notification = Notification.objects.create(
         employee=employee,
         shift_request=shift_request,
         action_response=action_response,
         message=message,
     )
+    prune_notifications(employee)
+    return notification
+
+
+def prune_notifications(employee: Employee) -> None:
+    """Delete notifications older than 24h, and cap storage at the 10 most recent."""
+    cutoff = timezone.now() - NOTIFICATION_RETENTION
+    Notification.objects.filter(employee=employee, created_at__lt=cutoff).delete()
+
+    keep_ids = Notification.objects.filter(employee=employee).order_by(
+        "-created_at"
+    ).values_list("pk", flat=True)[:MAX_NOTIFICATIONS_PER_EMPLOYEE]
+    Notification.objects.filter(employee=employee).exclude(pk__in=list(keep_ids)).delete()
 
 
 # ---------------------------------------------------------------------------

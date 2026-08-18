@@ -201,6 +201,7 @@
         <span class="notif-count" id="notif-count"></span>
       </button>
       <div class="notif-dropdown" id="notif-dropdown"></div>
+      <a href="{% url 'notifications_page' %}">Notifications</a>
       <a href="{% url 'account_logout' %}">Log out</a>
     {% endif %}
   </nav>
@@ -243,8 +244,9 @@
     } else {
       countEl.style.display = "none";
     }
+    const footer = '<div class="notif-item"><a href="{% url "notifications_page" %}">See all notifications</a></div>';
     if (data.notifications.length === 0) {
-      dropdown.innerHTML = '<div class="notif-item">No new notifications.</div>';
+      dropdown.innerHTML = '<div class="notif-item">No new notifications.</div>' + footer;
       return;
     }
     dropdown.innerHTML = data.notifications.map(function (n) {
@@ -258,7 +260,7 @@
           '</div>';
       }
       return '<div class="notif-item">' + escapeHtml(n.message) + actions + '</div>';
-    }).join("");
+    }).join("") + footer;
   }
 
   function poll() {
