@@ -111,3 +111,18 @@ class HandleResponseTests(TestCase):
     def test_rejects_invalid_answer_value(self):
         with self.assertRaises(ValueError):
             coverage_service.handle_response(self.bob_response, self.bob, "MAYBE")
+
+    def test_no_skips_a_candidate_who_already_answered(self):
+        # Simulate Carol already having a stale response on this request
+        # (e.g. an admin nudged current_candidate around by hand) so that
+        # when Bob declines, the cascade must skip straight past her to Dave.
+        dave = make_employee("Dave", seniority_rank=4)
+        ShiftResponse.objects.create(
+            shift_request=self.sr, employee=self.carol, answer=ShiftResponse.Answer.NO
+        )
+
+        coverage_service.handle_response(self.bob_response, self.bob, "NO")
+        self.sr.refresh_from_db()
+
+        self.assertEqual(self.sr.current_candidate, dave)
+        self.assertTrue(ShiftResponse.objects.filter(shift_request=self.sr, employee=dave).exists())
