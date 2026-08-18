@@ -31,14 +31,30 @@ def notify(
 
 
 def prune_notifications(employee: Employee) -> None:
-    """Delete notifications older than 24h, and cap storage at the 10 most recent."""
-    cutoff = timezone.now() - NOTIFICATION_RETENTION
-    Notification.objects.filter(employee=employee, created_at__lt=cutoff).delete()
+    """
+    Delete notifications older than 24h, and cap storage at the 10 most
+    recent. Notifications still awaiting a Yes/No response are exempt from
+    both rules — otherwise a flood of unrelated notifications (or just
+    time passing) could silently hide the one thing an employee still
+    owes an answer to, even though the request itself is still pending.
+    """
+    actionable = Notification.objects.filter(
+        employee=employee,
+        action_response__isnull=False,
+        action_response__answer=ShiftResponse.Answer.PENDING,
+    )
 
-    keep_ids = Notification.objects.filter(employee=employee).order_by(
-        "-created_at"
-    ).values_list("pk", flat=True)[:MAX_NOTIFICATIONS_PER_EMPLOYEE]
-    Notification.objects.filter(employee=employee).exclude(pk__in=list(keep_ids)).delete()
+    cutoff = timezone.now() - NOTIFICATION_RETENTION
+    Notification.objects.filter(employee=employee, created_at__lt=cutoff).exclude(
+        pk__in=actionable
+    ).delete()
+
+    keep_ids = set(
+        Notification.objects.filter(employee=employee).order_by(
+            "-created_at"
+        ).values_list("pk", flat=True)[:MAX_NOTIFICATIONS_PER_EMPLOYEE]
+    ) | set(actionable.values_list("pk", flat=True))
+    Notification.objects.filter(employee=employee).exclude(pk__in=keep_ids).delete()
 
 
 # ---------------------------------------------------------------------------
