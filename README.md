@@ -13,7 +13,7 @@ This is a classic Django app: the server renders HTML and sends it to the browse
 There are three moving pieces worth understanding before you touch the code:
 
 1. **Employees and seniority.** Every person who can request or give coverage is an `Employee` row with a `seniority_rank` (1 = most senior). This rank is what drives everything — when someone needs coverage, the app asks the *next* person down the list, not everyone at once.
-2. **The coverage state machine.** A shift request moves through a small set of statuses (`DRAFT` → `SEARCHING` → `COVERED` or `UNCOVERED`). All of the logic for what happens on each step lives in one file, `coverage/coverage_service.py`, so you don't have to hunt through views to understand the flow.
+2. **The coverage state machine.** A shift request moves through a small set of statuses (`DRAFT` → `SEARCHING` → `COVERED` or `UNCOVERED`, or `CANCELLED` at any point before it resolves). All of the logic for what happens on each step lives in one file, `coverage/coverage_service.py`, so you don't have to hunt through views to understand the flow.
 3. **In-app notifications.** Instead of texting or emailing people, the app creates `Notification` rows that show up in a bell icon in the header and on a dedicated `/notifications/` page. Delivery is real-time over a WebSocket (Django Channels) — the moment a notification is created server-side, it's pushed straight to every open tab for that employee, no polling loop involved.
 4. **Two roles, one model.** There's no separate "manager" account type — a manager is just an `Employee` with `is_manager=True`, granted through the admin. That one flag is what unlocks the extra manager dashboard and view-any-request access described below; everything else about how they use the app is identical to anyone else.
 
@@ -154,7 +154,13 @@ Visit `http://127.0.0.1:8000/` and sign in with Google.
 5. **No** → the requester is notified that this person declined, and the app moves on to the *next* person down the seniority list.
 6. If the app runs out of people to ask (nobody left below the requester, or everyone declined), the request is marked `UNCOVERED`.
 
-Every one of these transitions — request created, notification sent, response received, covered, uncovered — is written to a `CoverageEvent` row. You can see the full history for a request on its detail page, or browse all of them in the Django admin. Think of it as an audit log: nothing about a request's history is ever overwritten, only added to.
+Every one of these transitions — request created, notification sent, response received, covered, uncovered, cancelled — is written to a `CoverageEvent` row. You can see the full history for a request on its detail page, or browse all of them in the Django admin. Think of it as an audit log: nothing about a request's history is ever overwritten, only added to.
+
+### Cancelling a request
+
+The requester can cancel their own request from its detail page — a "Cancel request" button shows up for as long as it's `DRAFT` or `SEARCHING` (behind a confirm dialog, since it's not reversible). Once it's `COVERED`, `UNCOVERED`, or already `CANCELLED`, the button disappears; those are all terminal states.
+
+If it was actively `SEARCHING`, whoever was currently being asked gets an informational notification ("no response needed") so they're not left wondering. This is handled by `coverage_service.cancel_request()`, and it deliberately does **not** touch that person's `ShiftResponse` row — it's left `PENDING` as an honest historical record ("this is where things stood when it got cancelled"). Instead, `handle_response()` itself checks that the request is still `SEARCHING` before accepting a Yes/No — so if that notification arrives late, or someone clicks a stale Yes/No button from before the cancellation, it's rejected with a clear error rather than silently re-opening a cancelled request. The dashboard's "waiting on you" list and the notification bell's Yes/No buttons both apply that same check, so a cancelled ask stops looking actionable everywhere at once, not just where you happened to cancel it from.
 
 ---
 
@@ -230,8 +236,8 @@ Tests live in `coverage/tests/`, split by what they're testing:
 |---|---|
 | `test_models.py` | Model behavior — display helpers, `__str__` output, roster ordering |
 | `test_forms.py` | Form validation rules — the shift request form (date/time sanity checks) and the settings form (valid timezone choices, the 24h checkbox) |
-| `test_coverage_service.py` | The state machine — starting a search, handling YES/NO, edge cases like an exhausted roster |
-| `test_views.py` | Every page/endpoint a logged-in employee touches — dashboard, roster, settings, notifications, responding to a request — plus the manager dashboard and per-employee history pages, and that the timezone/time-format middleware activates correctly |
+| `test_coverage_service.py` | The state machine — starting a search, handling YES/NO, cancelling a request, edge cases like an exhausted roster or a stale Yes/No arriving after cancellation |
+| `test_views.py` | Every page/endpoint a logged-in employee touches — dashboard, roster, settings, notifications, responding to a request, cancelling a request — plus the manager dashboard and per-employee history pages, and that the timezone/time-format middleware activates correctly |
 | `test_auth_linking.py` | Google login gating and linking a new login to its Employee record |
 | `test_admin.py` | Smoke tests that each admin page loads without error |
 | `test_realtime.py` | The WebSocket consumer — connection gating, and that `notify()` actually pushes to the right employee (and only that employee) |

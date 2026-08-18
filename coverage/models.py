@@ -102,6 +102,7 @@ class ShiftRequest(models.Model):
         SEARCHING = "SEARCHING", "Searching"
         COVERED = "COVERED", "Covered"
         UNCOVERED = "UNCOVERED", "Uncovered"  # exhausted entire roster
+        CANCELLED = "CANCELLED", "Cancelled"  # requester withdrew it
 
     requester = models.ForeignKey(
         Employee, on_delete=models.CASCADE, related_name="shift_requests"
@@ -195,6 +196,7 @@ class CoverageEvent(models.Model):
         RESPONSE_RECEIVED = "RESPONSE_RECEIVED", "Response received"
         COVERED = "COVERED", "Shift covered"
         UNCOVERED = "UNCOVERED", "Roster exhausted – not covered"
+        CANCELLED = "CANCELLED", "Request cancelled by requester"
 
     shift_request = models.ForeignKey(
         ShiftRequest, on_delete=models.CASCADE, related_name="events"

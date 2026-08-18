@@ -53,11 +53,26 @@
     {% endif %}
   </div>
 
-  {% if sr.status == "DRAFT" and sr.requester_id == employee.id %}
-  <form method="post" action="{% url 'shift_request_activate' sr.pk %}" style="margin-top:1.25rem;">
-    {% csrf_token %}
-    <button type="submit" class="btn btn-success">Find coverage now</button>
-  </form>
+  {% if sr.requester_id == employee.id %}
+    {% if sr.status == "DRAFT" %}
+    <div style="margin-top:1.25rem; display:flex; gap:0.75rem;">
+      <form method="post" action="{% url 'shift_request_activate' sr.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-success">Find coverage now</button>
+      </form>
+      <form method="post" action="{% url 'shift_request_cancel' sr.pk %}"
+            onsubmit="return confirm('Cancel this shift request?');">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline">Cancel request</button>
+      </form>
+    </div>
+    {% elif sr.status == "SEARCHING" %}
+    <form method="post" action="{% url 'shift_request_cancel' sr.pk %}" style="margin-top:1.25rem;"
+          onsubmit="return confirm('Cancel this shift request? Whoever is currently being asked will be notified.');">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-outline">Cancel request</button>
+    </form>
+    {% endif %}
   {% endif %}
 </div>
 

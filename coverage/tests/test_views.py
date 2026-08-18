@@ -473,6 +473,129 @@ class ShiftRequestActivateViewTests(TestCase):
         self.assertRedirects(response, reverse("login"))
 
 
+class ShiftRequestCancelViewTests(TestCase):
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+        self.bob = make_employee("Bob", seniority_rank=2)
+
+    def test_owner_can_cancel_a_draft(self):
+        sr = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        self.client.force_login(self.alice.user)
+        response = self.client.post(reverse("shift_request_cancel", args=[sr.pk]))
+
+        self.assertRedirects(response, reverse("shift_request_detail", args=[sr.pk]))
+        sr.refresh_from_db()
+        self.assertEqual(sr.status, ShiftRequest.Status.CANCELLED)
+
+    def test_owner_can_cancel_a_searching_request(self):
+        sr = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(sr)
+        self.client.force_login(self.alice.user)
+        response = self.client.post(reverse("shift_request_cancel", args=[sr.pk]))
+
+        self.assertRedirects(response, reverse("shift_request_detail", args=[sr.pk]))
+        sr.refresh_from_db()
+        self.assertEqual(sr.status, ShiftRequest.Status.CANCELLED)
+
+    def test_get_request_does_not_cancel(self):
+        sr = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("shift_request_cancel", args=[sr.pk]))
+
+        self.assertEqual(response.status_code, 405)
+        sr.refresh_from_db()
+        self.assertEqual(sr.status, ShiftRequest.Status.DRAFT)
+
+    def test_non_owner_gets_404(self):
+        sr = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        self.client.force_login(self.bob.user)
+        response = self.client.post(reverse("shift_request_cancel", args=[sr.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_manager_cannot_cancel_someone_elses_request(self):
+        manager = make_employee("Manny", seniority_rank=3, is_manager=True)
+        sr = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        self.client.force_login(manager.user)
+        response = self.client.post(reverse("shift_request_cancel", args=[sr.pk]))
+        self.assertEqual(response.status_code, 404)
+
+        sr.refresh_from_db()
+        self.assertEqual(sr.status, ShiftRequest.Status.DRAFT)
+
+    def test_cancelling_an_already_covered_request_shows_error(self):
+        sr = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(sr)
+        response = ShiftResponse.objects.get(shift_request=sr, employee=self.bob)
+        coverage_service.handle_response(response, self.bob, "YES")
+
+        self.client.force_login(self.alice.user)
+        result = self.client.post(reverse("shift_request_cancel", args=[sr.pk]), follow=True)
+
+        messages = list(result.context["messages"])
+        self.assertTrue(any("already" in str(m).lower() or "covered" in str(m).lower() for m in messages))
+        sr.refresh_from_db()
+        self.assertEqual(sr.status, ShiftRequest.Status.COVERED)
+
+    def test_anonymous_user_redirected_to_login(self):
+        sr = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        response = self.client.post(reverse("shift_request_cancel", args=[sr.pk]))
+        self.assertRedirects(response, reverse("login"))
+
+    def test_cancelled_request_no_longer_shows_on_candidates_waiting_list(self):
+        sr = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(sr)
+
+        self.client.force_login(self.alice.user)
+        self.client.post(reverse("shift_request_cancel", args=[sr.pk]))
+
+        self.client.force_login(self.bob.user)
+        dashboard = self.client.get(reverse("dashboard"))
+        self.assertNotIn(
+            ShiftResponse.objects.get(shift_request=sr, employee=self.bob),
+            list(dashboard.context["my_pending_responses"]),
+        )
+
+    def test_cancel_button_shown_on_draft_and_searching(self):
+        self.client.force_login(self.alice.user)
+
+        draft = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        response = self.client.get(reverse("shift_request_detail", args=[draft.pk]))
+        self.assertContains(response, "Cancel request")
+
+        searching = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(searching)
+        response = self.client.get(reverse("shift_request_detail", args=[searching.pk]))
+        self.assertContains(response, "Cancel request")
+
+    def test_cancel_button_hidden_on_resolved_requests(self):
+        self.client.force_login(self.alice.user)
+
+        covered = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(covered)
+        response = ShiftResponse.objects.get(shift_request=covered, employee=self.bob)
+        coverage_service.handle_response(response, self.bob, "YES")
+        page = self.client.get(reverse("shift_request_detail", args=[covered.pk]))
+        self.assertNotContains(page, "Cancel request")
+
+        cancelled = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        coverage_service.cancel_request(cancelled, self.alice)
+        page = self.client.get(reverse("shift_request_detail", args=[cancelled.pk]))
+        self.assertNotContains(page, "Cancel request")
+
+    def test_cancelled_request_notification_no_longer_offers_answer_buttons(self):
+        sr = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(sr)
+
+        self.client.force_login(self.alice.user)
+        self.client.post(reverse("shift_request_cancel", args=[sr.pk]))
+
+        self.client.force_login(self.bob.user)
+        data = self.client.get(reverse("notifications_poll")).json()
+        matching = [n for n in data["notifications"] if n["shift_request_id"] == sr.pk]
+        self.assertTrue(matching)
+        self.assertIsNone(matching[0]["action_response_id"])
+
+
 class MyCoverageListsTests(TestCase):
     """Every employee should see their own waiting / covering / declined
     shifts on the dashboard, regardless of who requested them."""
@@ -946,3 +1069,9 @@ class ManagerEmployeeDetailTests(TestCase):
         self.client.force_login(self.manager.user)
         response = self.client.get(reverse("shift_request_detail", args=[sr.pk]))
         self.assertNotContains(response, "Find coverage now")
+
+    def test_hides_cancel_button_on_someone_elses_request(self):
+        sr = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        self.client.force_login(self.manager.user)
+        response = self.client.get(reverse("shift_request_detail", args=[sr.pk]))
+        self.assertNotContains(response, "Cancel request")

@@ -59,6 +59,7 @@ def prune_notifications(employee: Employee) -> None:
         employee=employee,
         action_response__isnull=False,
         action_response__answer=ShiftResponse.Answer.PENDING,
+        action_response__shift_request__status=ShiftRequest.Status.SEARCHING,
     )
 
     cutoff = timezone.now() - NOTIFICATION_RETENTION
@@ -95,3 +96,10 @@ def msg_covered_confirmation(coverer_name: str, requester_name: str, day: str, d
 
 def msg_declined_notification(decliner_name: str, date: str) -> str:
     return f"{decliner_name} has declined the shift on {date}."
+
+
+def msg_cancelled_notification(requester_name: str, day: str, date: str, time: str) -> str:
+    return (
+        f"{requester_name} cancelled their shift coverage request for {day}, "
+        f"{date} from {time}. No response needed."
+    )

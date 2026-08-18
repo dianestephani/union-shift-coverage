@@ -7,7 +7,7 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from .coverage_service import handle_response, start_coverage_search
+from .coverage_service import cancel_request, handle_response, start_coverage_search
 from .forms import EmployeeSettingsForm, ShiftRequestForm
 from .models import CoverageEvent, Employee, Notification, ShiftRequest, ShiftResponse
 from .notifications import prune_notifications
@@ -89,7 +89,9 @@ def dashboard(request):
         "current_candidate", "covered_by"
     ).order_by("-created_at")
     my_pending_responses = ShiftResponse.objects.filter(
-        employee=employee, answer=ShiftResponse.Answer.PENDING
+        employee=employee,
+        answer=ShiftResponse.Answer.PENDING,
+        shift_request__status=ShiftRequest.Status.SEARCHING,
     ).select_related("shift_request", "shift_request__requester")
     my_covering = ShiftResponse.objects.filter(
         employee=employee, answer=ShiftResponse.Answer.YES
@@ -258,6 +260,20 @@ def shift_request_activate(request, pk):
     return redirect("shift_request_detail", pk=pk)
 
 
+@login_required_employee
+@require_POST
+def shift_request_cancel(request, pk):
+    """Requester withdraws a DRAFT/SEARCHING request."""
+    employee = _get_logged_in_employee(request)
+    sr = get_object_or_404(ShiftRequest, pk=pk, requester=employee)
+    try:
+        cancel_request(sr, employee)
+        messages.success(request, "Request cancelled.")
+    except ValueError as exc:
+        messages.error(request, str(exc))
+    return redirect("shift_request_detail", pk=pk)
+
+
 # ---------------------------------------------------------------------------
 # Responding to a coverage request (replaces the SMS reply flow)
 # ---------------------------------------------------------------------------
@@ -312,7 +328,11 @@ def notifications_poll(request):
     ).select_related("shift_request", "action_response")
 
     def actionable_response_id(n):
-        if n.action_response_id and n.action_response.answer == ShiftResponse.Answer.PENDING:
+        if (
+            n.action_response_id
+            and n.action_response.answer == ShiftResponse.Answer.PENDING
+            and n.shift_request.status == ShiftRequest.Status.SEARCHING
+        ):
             return n.action_response_id
         return None
 

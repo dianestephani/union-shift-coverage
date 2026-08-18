@@ -3,6 +3,7 @@ Core coverage state machine.
 
 start_coverage_search(sr)                       – notify the first roster candidate
 handle_response(shift_response, employee, answer) – process a YES / NO button response
+cancel_request(sr, employee)                      – requester withdraws a DRAFT/SEARCHING request
 """
 
 import logging
@@ -14,6 +15,7 @@ from .notifications import (
     msg_coverage_request,
     msg_covered_confirmation,
     msg_declined_notification,
+    msg_cancelled_notification,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,6 +103,11 @@ def handle_response(shift_response: ShiftResponse, employee: Employee, answer: s
         raise ValueError("This request has already been answered.")
 
     sr = shift_response.shift_request
+    if sr.status != ShiftRequest.Status.SEARCHING:
+        # The requester cancelled it (or it otherwise stopped being active)
+        # after this ask went out but before it got answered.
+        raise ValueError("This request is no longer looking for coverage.")
+
     _log(sr, CoverageEvent.EventType.RESPONSE_RECEIVED, employee=employee, message=answer_upper)
 
     shift_response.answer = answer_upper
@@ -158,3 +165,31 @@ def _handle_no(sr: ShiftRequest, employee: Employee) -> str:
     sr.save(update_fields=["current_candidate", "updated_at"])
     _ask_candidate(sr, next_candidate)
     return f"Moved to next candidate: {next_candidate.name}."
+
+
+def cancel_request(sr: ShiftRequest, employee: Employee) -> None:
+    """
+    The requester withdraws a request that hasn't been resolved yet. Only
+    DRAFT and SEARCHING requests can be cancelled — COVERED/UNCOVERED/
+    already-CANCELLED are all terminal states.
+    """
+    if sr.requester_id != employee.id:
+        raise ValueError("Only the requester can cancel this request.")
+
+    if sr.status not in (ShiftRequest.Status.DRAFT, ShiftRequest.Status.SEARCHING):
+        raise ValueError(f"Can't cancel a request that's already {sr.get_status_display()}.")
+
+    was_searching = sr.status == ShiftRequest.Status.SEARCHING
+    current_candidate = sr.current_candidate
+
+    sr.status = ShiftRequest.Status.CANCELLED
+    sr.current_candidate = None
+    sr.save(update_fields=["status", "current_candidate", "updated_at"])
+    _log(sr, CoverageEvent.EventType.CANCELLED, employee=employee, message=f"Cancelled by {employee.name}.")
+
+    if was_searching and current_candidate:
+        day, date, time = _shift_context(sr)
+        notify(
+            current_candidate, sr,
+            msg_cancelled_notification(sr.requester.name, day, date, time),
+        )

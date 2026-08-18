@@ -14,6 +14,7 @@ urlpatterns = [
     path("request/new/", views.shift_request_new, name="shift_request_new"),
     path("request/<int:pk>/", views.shift_request_detail, name="shift_request_detail"),
     path("request/<int:pk>/activate/", views.shift_request_activate, name="shift_request_activate"),
+    path("request/<int:pk>/cancel/", views.shift_request_cancel, name="shift_request_cancel"),
 
     # Responding to a coverage request
     path("responses/<int:pk>/answer/", views.respond_to_shift, name="respond_to_shift"),
