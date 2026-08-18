@@ -31,6 +31,21 @@ class LoginGatingTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
 
+class NavigationTests(TestCase):
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+
+    def test_logged_in_nav_has_dashboard_link(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("roster"))
+        self.assertContains(response, ">Dashboard<")
+        self.assertContains(response, reverse("dashboard"))
+
+    def test_logged_out_nav_has_no_dashboard_link(self):
+        response = self.client.get(reverse("login"))
+        self.assertNotContains(response, ">Dashboard<")
+
+
 class RosterViewTests(TestCase):
     def setUp(self):
         self.alice = make_employee("Alice", seniority_rank=1)
@@ -65,13 +80,13 @@ class DashboardPendingResponsesTests(TestCase):
     def test_pending_candidate_sees_waiting_card(self):
         self.client.force_login(self.bob.user)
         response = self.client.get(reverse("dashboard"))
-        self.assertContains(response, "Requests waiting on you")
+        self.assertContains(response, "Waiting on you")
         self.assertContains(response, "Alice")
 
-    def test_requester_does_not_see_waiting_card(self):
+    def test_requester_sees_empty_waiting_list(self):
         self.client.force_login(self.alice.user)
         response = self.client.get(reverse("dashboard"))
-        self.assertNotContains(response, "Requests waiting on you")
+        self.assertContains(response, "Nothing waiting on you.")
 
 
 class RequesterCoverageVisibilityTests(TestCase):
@@ -202,6 +217,80 @@ class RespondToShiftViewTests(TestCase):
         response = self.client.post(url, {"answer": "YES"})
         self.assertRedirects(response, reverse("login"))
 
+    def test_ajax_request_returns_json_instead_of_redirect(self):
+        self.client.force_login(self.bob.user)
+        url = reverse("respond_to_shift", args=[self.bob_response.pk])
+        response = self.client.post(
+            url, {"answer": "YES"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True})
+
+        self.bob_response.refresh_from_db()
+        self.assertEqual(self.bob_response.answer, ShiftResponse.Answer.YES)
+
+    def test_ajax_request_returns_json_error_for_invalid_answer(self):
+        self.client.force_login(self.bob.user)
+        url = reverse("respond_to_shift", args=[self.bob_response.pk])
+        response = self.client.post(
+            url, {"answer": "MAYBE"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+
+        self.bob_response.refresh_from_db()
+        self.assertEqual(self.bob_response.answer, ShiftResponse.Answer.PENDING)
+
+
+class MyCoverageListsTests(TestCase):
+    """Every employee should see their own waiting / covering / declined
+    shifts on the dashboard, regardless of who requested them."""
+
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+        self.bob = make_employee("Bob", seniority_rank=2)
+        self.carol = make_employee("Carol", seniority_rank=3)
+
+        self.covering_sr = make_shift_request(self.alice, shift_date=datetime.date(2026, 8, 21))
+        coverage_service.start_coverage_search(self.covering_sr)
+        bob_covering_response = ShiftResponse.objects.get(
+            shift_request=self.covering_sr, employee=self.bob
+        )
+        coverage_service.handle_response(bob_covering_response, self.bob, "YES")
+
+        self.declined_sr = make_shift_request(self.alice, shift_date=datetime.date(2026, 8, 22))
+        coverage_service.start_coverage_search(self.declined_sr)
+        bob_declined_response = ShiftResponse.objects.get(
+            shift_request=self.declined_sr, employee=self.bob
+        )
+        coverage_service.handle_response(bob_declined_response, self.bob, "NO")
+
+        self.waiting_sr = make_shift_request(self.alice, shift_date=datetime.date(2026, 8, 23))
+        coverage_service.start_coverage_search(self.waiting_sr)  # Bob asked, left pending
+
+    def test_dashboard_shows_all_three_lists_for_bob(self):
+        self.client.force_login(self.bob.user)
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "You're covering")
+        self.assertContains(response, "You declined")
+        self.assertContains(response, "Waiting on you")
+
+        pending = list(response.context["my_pending_responses"])
+        covering = list(response.context["my_covering"])
+        declined = list(response.context["my_declined"])
+
+        self.assertEqual([r.shift_request for r in pending], [self.waiting_sr])
+        self.assertEqual([r.shift_request for r in covering], [self.covering_sr])
+        self.assertEqual([r.shift_request for r in declined], [self.declined_sr])
+
+    def test_lists_are_scoped_to_the_logged_in_employee(self):
+        self.client.force_login(self.carol.user)
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(list(response.context["my_covering"]), [])
+        self.assertEqual(list(response.context["my_declined"]), [])
+
 
 class NotificationEndpointTests(TestCase):
     def setUp(self):
@@ -239,8 +328,67 @@ class NotificationEndpointTests(TestCase):
         url = reverse("notification_mark_read", args=[self.notification.pk])
         self.client.post(url)
 
+    def test_answering_marks_its_notification_read_without_a_client_followup(self):
+        # The client is expected to call notification_mark_read after a
+        # successful answer, but the server must not depend on that
+        # follow-up actually happening (dropped request, direct API call,
+        # etc.) — otherwise the notification is stuck advertising buttons
+        # for a response that's no longer PENDING.
+        self.client.force_login(self.bob.user)
+        response = ShiftResponse.objects.get(shift_request=self.sr, employee=self.bob)
+        url = reverse("respond_to_shift", args=[response.pk])
+        self.client.post(url, {"answer": "YES"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
         self.notification.refresh_from_db()
-        self.assertIsNone(self.notification.read_at)
+        self.assertIsNotNone(self.notification.read_at)
+
+    def test_poll_never_advertises_buttons_for_an_already_answered_response(self):
+        response = ShiftResponse.objects.get(shift_request=self.sr, employee=self.bob)
+        coverage_service.handle_response(response, self.bob, "YES")
+
+        # Simulate the notification staying unread (e.g. the client-side
+        # mark-read call never fired) — poll must still refuse to offer
+        # Accept/Decline for it.
+        Notification.objects.filter(pk=self.notification.pk).update(read_at=None)
+
+        self.client.force_login(self.bob.user)
+        data = self.client.get(reverse("notifications_poll")).json()
+        matching = [n for n in data["notifications"] if n["id"] == self.notification.pk]
+        self.assertEqual(len(matching), 1)
+        self.assertIsNone(matching[0]["action_response_id"])
+
+    def test_declining_also_marks_its_notification_read(self):
+        # Mirrors the YES-path test above — the NO path cascades to the
+        # next candidate via different code (_handle_no), so it's worth
+        # confirming the mark-read fix isn't specific to acceptance.
+        self.client.force_login(self.bob.user)
+        response = ShiftResponse.objects.get(shift_request=self.sr, employee=self.bob)
+        url = reverse("respond_to_shift", args=[response.pk])
+        self.client.post(url, {"answer": "NO"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+        self.notification.refresh_from_db()
+        self.assertIsNotNone(self.notification.read_at)
+
+    def test_answering_does_not_mark_unrelated_notifications_read(self):
+        # A second, unrelated ask for Bob should be untouched by him
+        # answering the first one.
+        other_sr = make_shift_request(self.alice, shift_date=datetime.date(2026, 9, 1))
+        coverage_service.start_coverage_search(other_sr)
+        other_notification = Notification.objects.get(
+            employee=self.bob, shift_request=other_sr
+        )
+
+        self.client.force_login(self.bob.user)
+        response = ShiftResponse.objects.get(shift_request=self.sr, employee=self.bob)
+        url = reverse("respond_to_shift", args=[response.pk])
+        self.client.post(url, {"answer": "YES"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+        other_notification.refresh_from_db()
+        self.assertIsNone(other_notification.read_at)
+
+        # The one actually tied to the answered response should be read.
+        self.notification.refresh_from_db()
+        self.assertIsNotNone(self.notification.read_at)
 
 
 class ShiftRequestFlowTests(TestCase):

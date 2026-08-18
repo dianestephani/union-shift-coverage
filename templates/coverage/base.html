@@ -120,6 +120,31 @@
 
     .empty { color: var(--muted); font-size: 0.9rem; text-align: center; padding: 2rem; }
 
+    .coverage-lists {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .scroll-list {
+      max-height: 280px;
+      overflow-y: auto;
+    }
+    .scroll-list .list-item {
+      padding: 0.65rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .scroll-list .list-item:last-child { border-bottom: none; }
+    .list-count {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--muted);
+      background: var(--bg);
+      border-radius: 9999px;
+      padding: 0.1rem 0.55rem;
+      margin-left: 0.4rem;
+    }
+
     .notif-bell {
       position: relative;
       background: none;
@@ -168,6 +193,7 @@
   <a class="brand" href="/">Shift Coverage</a>
   <nav style="display:flex; align-items:center;">
     {% if request.user.is_authenticated and employee %}
+      <a href="{% url 'dashboard' %}">Dashboard</a>
       <a href="{% url 'roster' %}">Roster</a>
       <a href="{% url 'shift_request_new' %}">+ New Request</a>
       <button type="button" class="notif-bell" id="notif-bell">
@@ -199,6 +225,17 @@
   const countEl = document.getElementById("notif-count");
   const dropdown = document.getElementById("notif-dropdown");
 
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function getCookie(name) {
+    const match = document.cookie.match("(^|;)\\s*" + name + "\\s*=\\s*([^;]+)");
+    return match ? match.pop() : "";
+  }
+
   function render(data) {
     if (data.unread_count > 0) {
       countEl.textContent = data.unread_count;
@@ -211,8 +248,16 @@
       return;
     }
     dropdown.innerHTML = data.notifications.map(function (n) {
-      return '<div class="notif-item">' + n.message +
-        '<br><a href="/request/' + n.shift_request_id + '/">View request →</a></div>';
+      let actions = "";
+      if (n.action_response_id) {
+        actions = '<div style="margin-top:0.5rem;">' +
+          '<button type="button" class="btn btn-success btn-sm notif-answer" ' +
+          'data-response-id="' + n.action_response_id + '" data-notif-id="' + n.id + '" data-answer="YES">Yes, I can cover</button> ' +
+          '<button type="button" class="btn btn-outline btn-sm notif-answer" ' +
+          'data-response-id="' + n.action_response_id + '" data-notif-id="' + n.id + '" data-answer="NO">No, can\'t make it</button>' +
+          '</div>';
+      }
+      return '<div class="notif-item">' + escapeHtml(n.message) + actions + '</div>';
     }).join("");
   }
 
@@ -222,6 +267,46 @@
       .then(render)
       .catch(function () {});
   }
+
+  function markRead(notifId) {
+    return fetch("/notifications/" + notifId + "/read/", {
+      method: "POST",
+      headers: { "X-CSRFToken": getCookie("csrftoken") },
+    });
+  }
+
+  function respond(responseId, answer, notifId) {
+    const body = new FormData();
+    body.append("answer", answer);
+    return fetch("/responses/" + responseId + "/answer/", {
+      method: "POST",
+      headers: {
+        "X-CSRFToken": getCookie("csrftoken"),
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      body: body,
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) {
+          alert(data.error || "Could not record your response.");
+          return;
+        }
+        return markRead(notifId).then(function () {
+          window.location.reload();
+        });
+      })
+      .catch(function () {
+        alert("Something went wrong recording your response.");
+      });
+  }
+
+  dropdown.addEventListener("click", function (event) {
+    const btn = event.target.closest(".notif-answer");
+    if (!btn) return;
+    btn.disabled = true;
+    respond(btn.dataset.responseId, btn.dataset.answer, btn.dataset.notifId);
+  });
 
   bell.addEventListener("click", function () {
     dropdown.classList.toggle("open");
