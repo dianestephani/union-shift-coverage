@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from coverage import coverage_service
 from coverage.models import Notification, ShiftRequest, ShiftResponse
+from coverage.notifications import prune_notifications
 from .factories import make_employee, make_shift_request
 
 User = get_user_model()
@@ -69,6 +70,88 @@ class RosterViewTests(TestCase):
         self.client.force_login(self.alice.user)
         response = self.client.get(reverse("roster"))
         self.assertContains(response, "Inactive")
+
+    def test_roster_shows_email_and_phone(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("roster"))
+        self.assertContains(response, "alice@example.com")
+        self.assertContains(response, "bob@example.com")
+
+    def test_roster_shows_placeholder_for_missing_phone(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("roster"))
+        self.assertContains(response, "—")
+
+
+class SettingsViewTests(TestCase):
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+        self.bob = make_employee("Bob", seniority_rank=2)
+
+    def test_anonymous_user_redirected_to_login(self):
+        response = self.client.get(reverse("settings"))
+        self.assertRedirects(response, reverse("login"))
+
+    def test_get_shows_current_timezone(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("settings"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "America/Chicago")
+
+    def test_post_updates_own_timezone(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.post(reverse("settings"), {"timezone": "Asia/Tokyo"})
+        self.assertRedirects(response, reverse("settings"))
+
+        self.alice.refresh_from_db()
+        self.assertEqual(self.alice.timezone, "Asia/Tokyo")
+
+    def test_post_does_not_affect_other_employees(self):
+        self.client.force_login(self.alice.user)
+        self.client.post(reverse("settings"), {"timezone": "Asia/Tokyo"})
+
+        self.bob.refresh_from_db()
+        self.assertEqual(self.bob.timezone, "America/Chicago")
+
+    def test_invalid_timezone_choice_is_rejected(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.post(reverse("settings"), {"timezone": "Mars/Olympus_Mons"})
+        self.assertEqual(response.status_code, 200)
+        self.alice.refresh_from_db()
+        self.assertEqual(self.alice.timezone, "America/Chicago")
+
+
+class EmployeeTimezoneMiddlewareTests(TestCase):
+    """
+    Testing this by scraping rendered timestamps out of HTML is fragile
+    (Django's default datetime formatting, day-boundary edge cases, and the
+    24h notification-retention window all get in the way). Instead, check
+    directly what timezone the middleware activated for the request —
+    that's the actual behavior this middleware is responsible for.
+    """
+
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+
+    def test_activates_employees_chosen_timezone(self):
+        self.alice.timezone = "Asia/Tokyo"
+        self.alice.save(update_fields=["timezone"])
+        self.client.force_login(self.alice.user)
+
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(str(timezone.get_current_timezone()), "Asia/Tokyo")
+
+    def test_defaults_to_employees_default_timezone(self):
+        self.client.force_login(self.alice.user)
+        self.client.get(reverse("dashboard"))
+        self.assertEqual(str(timezone.get_current_timezone()), "America/Chicago")
+
+    def test_falls_back_to_server_timezone_when_logged_out(self):
+        from django.conf import settings
+
+        self.client.get(reverse("login"))
+        self.assertEqual(str(timezone.get_current_timezone()), settings.TIME_ZONE)
 
 
 class DashboardPendingResponsesTests(TestCase):
@@ -203,6 +286,21 @@ class RespondToShiftViewTests(TestCase):
 
         self.bob_response.refresh_from_db()
         self.assertEqual(self.bob_response.answer, ShiftResponse.Answer.YES)
+
+    def test_next_pointing_off_site_is_ignored(self):
+        # `next` is a plain POST field, not a signed/trusted value — an
+        # attacker-crafted form could set it to an external URL to use this
+        # site as an open-redirect stepping stone to a phishing page.
+        self.client.force_login(self.bob.user)
+        url = reverse("respond_to_shift", args=[self.bob_response.pk])
+        response = self.client.post(url, {"answer": "YES", "next": "https://evil.example.com/phish"})
+        self.assertRedirects(response, reverse("dashboard"))
+
+    def test_protocol_relative_next_is_ignored(self):
+        self.client.force_login(self.bob.user)
+        url = reverse("respond_to_shift", args=[self.bob_response.pk])
+        response = self.client.post(url, {"answer": "YES", "next": "//evil.example.com/phish"})
+        self.assertRedirects(response, reverse("dashboard"))
 
     def test_other_employee_gets_404(self):
         self.client.force_login(self.carol.user)
@@ -419,6 +517,12 @@ class NotificationEndpointTests(TestCase):
         self.notification.refresh_from_db()
         self.assertIsNotNone(self.notification.read_at)
 
+    def test_mark_read_ignores_off_site_next(self):
+        self.client.force_login(self.bob.user)
+        url = reverse("notification_mark_read", args=[self.notification.pk])
+        response = self.client.post(url, {"next": "//evil.example.com/phish"})
+        self.assertRedirects(response, reverse("dashboard"))
+
     def test_marking_an_already_read_notification_again_is_a_noop(self):
         self.client.force_login(self.bob.user)
         url = reverse("notification_mark_read", args=[self.notification.pk])
@@ -551,6 +655,53 @@ class NotificationRetentionTests(TestCase):
             remaining_messages,
             {f"notification {i}" for i in range(2, 12)},
         )
+
+    def test_pending_actionable_notification_survives_the_cap(self):
+        # If Bob still owes a Yes/No on a coverage request, that notification
+        # must not get pushed out by a flood of unrelated ones — otherwise
+        # he'd stop seeing the "can you cover this?" prompt in his bell/
+        # notifications page even though the request is still waiting on him.
+        from coverage.notifications import notify
+
+        coverage_service.start_coverage_search(self.sr)
+        actionable = Notification.objects.get(
+            employee=self.bob, shift_request=self.sr, action_response__isnull=False
+        )
+
+        for i in range(15):
+            notify(self.bob, self.sr, f"unrelated fyi {i}")
+
+        self.assertTrue(Notification.objects.filter(pk=actionable.pk).exists())
+
+    def test_pending_actionable_notification_survives_expiry(self):
+        coverage_service.start_coverage_search(self.sr)
+        actionable = Notification.objects.get(
+            employee=self.bob, shift_request=self.sr, action_response__isnull=False
+        )
+        Notification.objects.filter(pk=actionable.pk).update(
+            created_at=timezone.now() - datetime.timedelta(hours=25)
+        )
+
+        prune_notifications(self.bob)
+
+        self.assertTrue(Notification.objects.filter(pk=actionable.pk).exists())
+
+    def test_answered_notification_is_no_longer_exempt_from_the_cap(self):
+        # Once Bob actually answers, the notification isn't "actionable"
+        # anymore and should go back to being subject to normal pruning.
+        from coverage.notifications import notify
+
+        coverage_service.start_coverage_search(self.sr)
+        response = ShiftResponse.objects.get(shift_request=self.sr, employee=self.bob)
+        coverage_service.handle_response(response, self.bob, "YES")
+        answered = Notification.objects.get(
+            employee=self.bob, shift_request=self.sr, action_response=response
+        )
+
+        for i in range(15):
+            notify(self.bob, self.sr, f"unrelated fyi {i}")
+
+        self.assertFalse(Notification.objects.filter(pk=answered.pk).exists())
 
 
 class ShiftRequestFlowTests(TestCase):

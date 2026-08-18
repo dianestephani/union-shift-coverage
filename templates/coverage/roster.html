@@ -16,6 +16,8 @@
       <tr>
         <th>Rank</th>
         <th>Name</th>
+        <th>Email</th>
+        <th>Phone</th>
         <th>Status</th>
       </tr>
     </thead>
@@ -27,6 +29,8 @@
           {{ e.name }}
           {% if e == employee %}<span style="color:var(--muted); font-size:0.85rem;">(you)</span>{% endif %}
         </td>
+        <td>{{ e.email|default:"—" }}</td>
+        <td>{{ e.phone_number|default:"—" }}</td>
         <td>
           {% if e.is_active %}
             <span class="badge badge-covered">Active</span>

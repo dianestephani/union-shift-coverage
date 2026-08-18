@@ -4,14 +4,30 @@ from django.contrib import messages
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from .coverage_service import handle_response, start_coverage_search
-from .forms import ShiftRequestForm
+from .forms import EmployeeSettingsForm, ShiftRequestForm
 from .models import CoverageEvent, Employee, Notification, ShiftRequest, ShiftResponse
 from .notifications import prune_notifications
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_next_url(request, fallback):
+    """
+    Only redirect to a `next` value if it points back at this site.
+    Without this check, a `next` param crafted by an attacker (this is a
+    plain POST field, not something Django signs) could send a logged-in
+    user off to an external phishing page.
+    """
+    next_url = request.POST.get("next")
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return next_url
+    return fallback
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +84,26 @@ def dashboard(request):
         "my_pending_responses": my_pending_responses,
         "my_covering": my_covering,
         "my_declined": my_declined,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+@login_required_employee
+def settings_page(request):
+    employee = _get_logged_in_employee(request)
+    form = EmployeeSettingsForm(request.POST or None, instance=employee)
+
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Settings saved.")
+        return redirect("settings")
+
+    return render(request, "coverage/settings.html", {
+        "employee": employee,
+        "form": form,
     })
 
 
@@ -187,8 +223,7 @@ def respond_to_shift(request, pk):
             return JsonResponse({"ok": False, "error": str(exc)}, status=400)
         messages.error(request, str(exc))
 
-    next_url = request.POST.get("next") or "dashboard"
-    return redirect(next_url)
+    return redirect(_safe_next_url(request, "dashboard"))
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +278,6 @@ def notification_mark_read(request, pk):
     Notification.objects.filter(pk=pk, employee=employee, read_at__isnull=True).update(
         read_at=timezone.now()
     )
-    next_url = request.POST.get("next")
-    if next_url:
-        return redirect(next_url)
+    if request.POST.get("next"):
+        return redirect(_safe_next_url(request, "dashboard"))
     return JsonResponse({"ok": True})
