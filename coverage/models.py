@@ -2,6 +2,8 @@ from django.conf import settings
 from django.db import models
 from phonenumber_field.modelfields import PhoneNumberField
 
+from .time_format import uses_24h_time
+
 # A curated subset of IANA timezone names, rather than the full ~350-entry
 # zoneinfo database, so the settings page dropdown stays easy to scan.
 TIMEZONE_CHOICES = [
@@ -56,11 +58,19 @@ class Employee(models.Model):
         help_text="1 = most senior. Lower numbers have higher seniority.",
     )
     is_active = models.BooleanField(default=True)
+    is_manager = models.BooleanField(
+        default=False,
+        help_text="Managers can see every open request, the full roster, and each employee's history.",
+    )
     timezone = models.CharField(
         max_length=64,
         choices=TIMEZONE_CHOICES,
         default="America/Chicago",
         help_text="Timestamps you see in the app (notifications, request history) are shown in this timezone.",
+    )
+    military_time = models.BooleanField(
+        default=False,
+        help_text="Show times like 14:00 instead of 2:00 PM.",
     )
 
     class Meta:
@@ -134,8 +144,9 @@ class ShiftRequest(models.Model):
         return self.shift_date.strftime("%B %-d, %Y")
 
     def time_display(self):
-        start = self.start_time.strftime("%-I:%M %p")
-        end = self.end_time.strftime("%-I:%M %p")
+        fmt = "%H:%M" if uses_24h_time() else "%-I:%M %p"
+        start = self.start_time.strftime(fmt)
+        end = self.end_time.strftime(fmt)
         return f"{start}–{end}"
 
 

@@ -1,4 +1,5 @@
 {% extends "coverage/base.html" %}
+{% load coverage_extras %}
 {% block title %}Notifications – Shift Coverage{% endblock %}
 
 {% block content %}
@@ -18,7 +19,7 @@
     <div class="list-item" data-notif-id="{{ n.pk }}" style="{% if n.read_at %}opacity:0.6;{% endif %}">
       <p style="margin-bottom:0.4rem; font-size:0.9rem;">{{ n.message }}</p>
       <p style="margin-bottom:0.6rem; color:var(--muted); font-size:0.8rem;">
-        {{ n.created_at }}
+        {{ n.created_at|user_datetime }}
         {% if not n.read_at %}<span class="badge badge-searching">Unread</span>{% endif %}
       </p>
       {% if n.action_response_id and n.action_response.answer == "PENDING" %}

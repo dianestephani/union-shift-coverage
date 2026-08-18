@@ -120,6 +120,29 @@ class SettingsViewTests(TestCase):
         self.alice.refresh_from_db()
         self.assertEqual(self.alice.timezone, "America/Chicago")
 
+    def test_military_time_defaults_to_off(self):
+        self.assertFalse(self.alice.military_time)
+
+    def test_post_enables_military_time(self):
+        self.client.force_login(self.alice.user)
+        # Checkboxes only appear in POST data when checked.
+        response = self.client.post(
+            reverse("settings"), {"timezone": "America/Chicago", "military_time": "on"}
+        )
+        self.assertRedirects(response, reverse("settings"))
+        self.alice.refresh_from_db()
+        self.assertTrue(self.alice.military_time)
+
+    def test_omitting_military_time_from_post_turns_it_off(self):
+        self.alice.military_time = True
+        self.alice.save(update_fields=["military_time"])
+
+        self.client.force_login(self.alice.user)
+        self.client.post(reverse("settings"), {"timezone": "America/Chicago"})
+
+        self.alice.refresh_from_db()
+        self.assertFalse(self.alice.military_time)
+
 
 class EmployeeTimezoneMiddlewareTests(TestCase):
     """
@@ -146,6 +169,21 @@ class EmployeeTimezoneMiddlewareTests(TestCase):
         self.client.force_login(self.alice.user)
         self.client.get(reverse("dashboard"))
         self.assertEqual(str(timezone.get_current_timezone()), "America/Chicago")
+
+    def test_dashboard_shows_12h_time_by_default(self):
+        make_shift_request(self.alice, start_time=datetime.time(14, 0), end_time=datetime.time(22, 0))
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "2:00 PM–10:00 PM")
+
+    def test_dashboard_shows_24h_time_when_employee_prefers_it(self):
+        self.alice.military_time = True
+        self.alice.save(update_fields=["military_time"])
+        make_shift_request(self.alice, start_time=datetime.time(14, 0), end_time=datetime.time(22, 0))
+
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "14:00–22:00")
 
     def test_falls_back_to_server_timezone_when_logged_out(self):
         from django.conf import settings
@@ -748,6 +786,14 @@ class ShiftRequestFlowTests(TestCase):
         response = self.client.get(reverse("shift_request_detail", args=[sr.pk]))
         self.assertEqual(response.status_code, 404)
 
+    def test_manager_can_view_anyone_elses_request(self):
+        manager = make_employee("Manny", seniority_rank=3, is_manager=True)
+        sr = make_shift_request(self.alice)
+        self.client.force_login(manager.user)
+        response = self.client.get(reverse("shift_request_detail", args=[sr.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Alice")
+
     def test_invalid_post_rerenders_form_with_errors(self):
         self.client.force_login(self.alice.user)
         response = self.client.post(reverse("shift_request_new"), {
@@ -760,3 +806,108 @@ class ShiftRequestFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context["form"].errors)
         self.assertFalse(ShiftRequest.objects.filter(requester=self.alice).exists())
+
+
+class ManagerDashboardTests(TestCase):
+    def setUp(self):
+        self.manager = make_employee("Manny", seniority_rank=1, is_manager=True)
+        self.alice = make_employee("Alice", seniority_rank=2)
+        self.bob = make_employee("Bob", seniority_rank=3)
+
+    def test_anonymous_user_redirected_to_login(self):
+        response = self.client.get(reverse("manager_dashboard"))
+        self.assertRedirects(response, reverse("login"))
+
+    def test_non_manager_gets_404(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("manager_dashboard"))
+        self.assertEqual(response.status_code, 404)
+
+    def test_manager_sees_the_page(self):
+        self.client.force_login(self.manager.user)
+        response = self.client.get(reverse("manager_dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Alice")
+        self.assertContains(response, "Bob")
+
+    def test_shows_draft_and_searching_requests_as_open(self):
+        draft = make_shift_request(self.bob, status=ShiftRequest.Status.DRAFT)
+        # Alice (rank 2) has Bob (rank 3) below her, so this one stays SEARCHING.
+        searching = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(searching)
+
+        self.client.force_login(self.manager.user)
+        response = self.client.get(reverse("manager_dashboard"))
+        open_requests = list(response.context["open_requests"])
+        self.assertIn(draft, open_requests)
+        self.assertIn(searching, open_requests)
+
+    def test_covered_and_uncovered_requests_are_not_open(self):
+        # Alice (rank 2) requests, Bob (rank 3, last in roster) responds.
+        covered = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(covered)
+        response = ShiftResponse.objects.get(shift_request=covered, employee=self.bob)
+        coverage_service.handle_response(response, self.bob, "YES")
+
+        uncovered = make_shift_request(self.alice, shift_date=datetime.date(2026, 9, 1))
+        coverage_service.start_coverage_search(uncovered)
+        response2 = ShiftResponse.objects.get(shift_request=uncovered, employee=self.bob)
+        coverage_service.handle_response(response2, self.bob, "NO")
+
+        self.client.force_login(self.manager.user)
+        response = self.client.get(reverse("manager_dashboard"))
+        open_requests = list(response.context["open_requests"])
+        self.assertNotIn(covered, open_requests)
+        self.assertNotIn(uncovered, open_requests)
+
+    def test_shows_recent_activity(self):
+        sr = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(sr)
+
+        self.client.force_login(self.manager.user)
+        response = self.client.get(reverse("manager_dashboard"))
+        self.assertContains(response, "Coverage search started")
+
+    def test_manager_link_visible_in_nav_only_for_managers(self):
+        self.client.force_login(self.manager.user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, reverse("manager_dashboard"))
+
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertNotContains(response, reverse("manager_dashboard"))
+
+
+class ManagerEmployeeDetailTests(TestCase):
+    def setUp(self):
+        self.manager = make_employee("Manny", seniority_rank=1, is_manager=True)
+        self.alice = make_employee("Alice", seniority_rank=2)
+        self.bob = make_employee("Bob", seniority_rank=3)
+
+    def test_anonymous_user_redirected_to_login(self):
+        response = self.client.get(reverse("manager_employee_detail", args=[self.alice.pk]))
+        self.assertRedirects(response, reverse("login"))
+
+    def test_non_manager_gets_404(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("manager_employee_detail", args=[self.bob.pk]))
+        self.assertEqual(response.status_code, 404)
+
+    def test_manager_sees_employees_request_and_response_history(self):
+        sr = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(sr)
+
+        self.client.force_login(self.manager.user)
+
+        alice_page = self.client.get(reverse("manager_employee_detail", args=[self.alice.pk]))
+        self.assertEqual(alice_page.status_code, 200)
+        self.assertIn(sr, list(alice_page.context["requests"]))
+
+        bob_page = self.client.get(reverse("manager_employee_detail", args=[self.bob.pk]))
+        bob_response = ShiftResponse.objects.get(shift_request=sr, employee=self.bob)
+        self.assertIn(bob_response, list(bob_page.context["responses"]))
+
+    def test_unknown_employee_404s(self):
+        self.client.force_login(self.manager.user)
+        response = self.client.get(reverse("manager_employee_detail", args=[99999]))
+        self.assertEqual(response.status_code, 404)

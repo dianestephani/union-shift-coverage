@@ -1,9 +1,14 @@
 {% extends "coverage/base.html" %}
+{% load coverage_extras %}
 {% block title %}Shift Request #{{ sr.pk }} – Shift Coverage{% endblock %}
 
 {% block content %}
 <div style="margin-bottom:1rem;">
-  <a href="{% url 'dashboard' %}" style="font-size:0.875rem; color:var(--muted);">← Back to dashboard</a>
+  {% if sr.requester_id == employee.id %}
+    <a href="{% url 'dashboard' %}" style="font-size:0.875rem; color:var(--muted);">← Back to dashboard</a>
+  {% else %}
+    <a href="{% url 'manager_employee_detail' sr.requester_id %}" style="font-size:0.875rem; color:var(--muted);">← Back to {{ sr.requester.name }}</a>
+  {% endif %}
 </div>
 
 <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:1.25rem;">
@@ -14,6 +19,12 @@
 <!-- Summary card -->
 <div class="card">
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+    {% if sr.requester_id != employee.id %}
+    <div style="grid-column:1/-1;">
+      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Requested by</p>
+      <p><strong>{{ sr.requester.name }}</strong></p>
+    </div>
+    {% endif %}
     <div>
       <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Date</p>
       <p><strong>{{ sr.day_display }}</strong>, {{ sr.date_display }}</p>
@@ -42,7 +53,7 @@
     {% endif %}
   </div>
 
-  {% if sr.status == "DRAFT" %}
+  {% if sr.status == "DRAFT" and sr.requester_id == employee.id %}
   <form method="post" action="{% url 'shift_request_activate' sr.pk %}" style="margin-top:1.25rem;">
     {% csrf_token %}
     <button type="submit" class="btn btn-success">Find coverage now</button>
@@ -67,7 +78,7 @@
     {% for r in responses %}
       <tr>
         <td>{{ r.employee.name }}</td>
-        <td style="font-size:0.85rem; color:var(--muted);">{{ r.asked_at|date:"M j, g:i a" }}</td>
+        <td style="font-size:0.85rem; color:var(--muted);">{{ r.asked_at|user_datetime_short }}</td>
         <td>
           {% if r.answer == "YES" %}
             <span class="badge badge-covered">{{ r.get_answer_display }}</span>
@@ -77,7 +88,7 @@
             <span class="badge badge-draft">Pending</span>
           {% endif %}
         </td>
-        <td style="font-size:0.85rem; color:var(--muted);">{{ r.answered_at|date:"M j, g:i a"|default:"—" }}</td>
+        <td style="font-size:0.85rem; color:var(--muted);">{{ r.answered_at|user_datetime_short|default:"—" }}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -96,7 +107,7 @@
     <tbody>
     {% for e in events %}
       <tr>
-        <td style="white-space:nowrap; font-size:0.8rem; color:var(--muted);">{{ e.created_at|date:"M j, g:i a" }}</td>
+        <td style="white-space:nowrap; font-size:0.8rem; color:var(--muted);">{{ e.created_at|user_datetime_short }}</td>
         <td style="font-size:0.85rem;">{{ e.get_event_type_display }}</td>
         <td style="font-size:0.85rem;">{{ e.employee.name|default:"—" }}</td>
         <td style="font-size:0.8rem; color:var(--muted); max-width:260px; word-break:break-word;">{{ e.message|truncatechars:120 }}</td>

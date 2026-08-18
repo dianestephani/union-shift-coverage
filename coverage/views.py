@@ -1,7 +1,7 @@
 import logging
 
 from django.contrib import messages
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -57,6 +57,25 @@ def login_view(request):
     if _get_logged_in_employee(request):
         return redirect("dashboard")
     return render(request, "coverage/login.html")
+
+
+def manager_required(view_func):
+    """
+    Redirects to login if not logged in, and 404s (rather than a 403 that
+    would reveal the page exists) if the employee isn't a manager.
+    """
+    from functools import wraps
+
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        employee = _get_logged_in_employee(request)
+        if not employee:
+            return redirect("login")
+        if not employee.is_manager:
+            raise Http404
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +141,46 @@ def roster(request):
 
 
 # ---------------------------------------------------------------------------
+# Manager dashboard
+# ---------------------------------------------------------------------------
+
+@manager_required
+def manager_dashboard(request):
+    employee = _get_logged_in_employee(request)
+    open_requests = ShiftRequest.objects.filter(
+        status__in=[ShiftRequest.Status.DRAFT, ShiftRequest.Status.SEARCHING]
+    ).select_related("requester", "current_candidate").order_by("-created_at")
+    employees = Employee.objects.all().order_by("seniority_rank")
+    recent_events = CoverageEvent.objects.select_related(
+        "shift_request", "shift_request__requester", "employee"
+    ).order_by("-created_at")[:25]
+    return render(request, "coverage/manager_dashboard.html", {
+        "employee": employee,
+        "open_requests": open_requests,
+        "employees": employees,
+        "recent_events": recent_events,
+    })
+
+
+@manager_required
+def manager_employee_detail(request, pk):
+    employee = _get_logged_in_employee(request)
+    target = get_object_or_404(Employee, pk=pk)
+    requests = ShiftRequest.objects.filter(requester=target).select_related(
+        "current_candidate", "covered_by"
+    ).order_by("-created_at")
+    responses = ShiftResponse.objects.filter(employee=target).select_related(
+        "shift_request", "shift_request__requester"
+    ).order_by("-asked_at")
+    return render(request, "coverage/manager_employee_detail.html", {
+        "employee": employee,
+        "target": target,
+        "requests": requests,
+        "responses": responses,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Shift request views
 # ---------------------------------------------------------------------------
 
@@ -167,10 +226,11 @@ def shift_request_new(request):
 def shift_request_detail(request, pk):
     employee = _get_logged_in_employee(request)
     sr = get_object_or_404(
-        ShiftRequest.objects.select_related("current_candidate", "covered_by"),
+        ShiftRequest.objects.select_related("current_candidate", "covered_by", "requester"),
         pk=pk,
-        requester=employee,
     )
+    if sr.requester_id != employee.id and not employee.is_manager:
+        raise Http404
     events = sr.events.select_related("employee").order_by("created_at")
     responses = sr.responses.select_related("employee").order_by("asked_at")
     return render(request, "coverage/shift_request_detail.html", {

@@ -2,6 +2,7 @@ import datetime
 
 from django.test import TestCase
 
+from coverage import time_format
 from coverage.models import CoverageEvent, Notification, ShiftRequest, ShiftResponse
 from .factories import make_employee, make_shift_request
 
@@ -35,6 +36,22 @@ class ShiftRequestDisplayTests(TestCase):
         self.assertEqual(sr.date_display(), "August 20, 2026")
         self.assertEqual(sr.time_display(), "9:00 AM–5:30 PM")
         self.assertEqual(sr.status, ShiftRequest.Status.DRAFT)
+
+    def test_time_display_honors_active_24h_preference(self):
+        requester = make_employee("Alice", seniority_rank=1)
+        sr = ShiftRequest.objects.create(
+            requester=requester,
+            shift_date=datetime.date(2026, 8, 20),
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(17, 30),
+        )
+        time_format.activate(True)
+        try:
+            self.assertEqual(sr.time_display(), "09:00–17:30")
+        finally:
+            time_format.deactivate()
+
+        self.assertEqual(sr.time_display(), "9:00 AM–5:30 PM")
 
 
 class StrMethodTests(TestCase):

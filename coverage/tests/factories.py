@@ -9,7 +9,7 @@ from coverage.models import Employee, ShiftRequest
 User = get_user_model()
 
 
-def make_employee(name, seniority_rank, email=None, is_active=True, link_user=True):
+def make_employee(name, seniority_rank, email=None, is_active=True, link_user=True, is_manager=False):
     """
     Create an Employee, optionally with a linked auth User (simulating a
     completed Google login) so it can be used with Client.force_login.
@@ -24,6 +24,7 @@ def make_employee(name, seniority_rank, email=None, is_active=True, link_user=Tr
         user=user,
         seniority_rank=seniority_rank,
         is_active=is_active,
+        is_manager=is_manager,
     )
 
 
