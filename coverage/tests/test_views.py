@@ -71,6 +71,88 @@ class RosterViewTests(TestCase):
         response = self.client.get(reverse("roster"))
         self.assertContains(response, "Inactive")
 
+    def test_roster_shows_email_and_phone(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("roster"))
+        self.assertContains(response, "alice@example.com")
+        self.assertContains(response, "bob@example.com")
+
+    def test_roster_shows_placeholder_for_missing_phone(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("roster"))
+        self.assertContains(response, "—")
+
+
+class SettingsViewTests(TestCase):
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+        self.bob = make_employee("Bob", seniority_rank=2)
+
+    def test_anonymous_user_redirected_to_login(self):
+        response = self.client.get(reverse("settings"))
+        self.assertRedirects(response, reverse("login"))
+
+    def test_get_shows_current_timezone(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("settings"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "America/Chicago")
+
+    def test_post_updates_own_timezone(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.post(reverse("settings"), {"timezone": "Asia/Tokyo"})
+        self.assertRedirects(response, reverse("settings"))
+
+        self.alice.refresh_from_db()
+        self.assertEqual(self.alice.timezone, "Asia/Tokyo")
+
+    def test_post_does_not_affect_other_employees(self):
+        self.client.force_login(self.alice.user)
+        self.client.post(reverse("settings"), {"timezone": "Asia/Tokyo"})
+
+        self.bob.refresh_from_db()
+        self.assertEqual(self.bob.timezone, "America/Chicago")
+
+    def test_invalid_timezone_choice_is_rejected(self):
+        self.client.force_login(self.alice.user)
+        response = self.client.post(reverse("settings"), {"timezone": "Mars/Olympus_Mons"})
+        self.assertEqual(response.status_code, 200)
+        self.alice.refresh_from_db()
+        self.assertEqual(self.alice.timezone, "America/Chicago")
+
+
+class EmployeeTimezoneMiddlewareTests(TestCase):
+    """
+    Testing this by scraping rendered timestamps out of HTML is fragile
+    (Django's default datetime formatting, day-boundary edge cases, and the
+    24h notification-retention window all get in the way). Instead, check
+    directly what timezone the middleware activated for the request —
+    that's the actual behavior this middleware is responsible for.
+    """
+
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+
+    def test_activates_employees_chosen_timezone(self):
+        self.alice.timezone = "Asia/Tokyo"
+        self.alice.save(update_fields=["timezone"])
+        self.client.force_login(self.alice.user)
+
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(str(timezone.get_current_timezone()), "Asia/Tokyo")
+
+    def test_defaults_to_employees_default_timezone(self):
+        self.client.force_login(self.alice.user)
+        self.client.get(reverse("dashboard"))
+        self.assertEqual(str(timezone.get_current_timezone()), "America/Chicago")
+
+    def test_falls_back_to_server_timezone_when_logged_out(self):
+        from django.conf import settings
+
+        self.client.get(reverse("login"))
+        self.assertEqual(str(timezone.get_current_timezone()), settings.TIME_ZONE)
+
 
 class DashboardPendingResponsesTests(TestCase):
     def setUp(self):

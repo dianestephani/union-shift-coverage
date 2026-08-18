@@ -4,7 +4,7 @@ from .models import CoverageEvent, Employee, Notification, ShiftRequest, ShiftRe
 
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
-    list_display = ["seniority_rank", "name", "email", "user", "phone_number", "is_active"]
+    list_display = ["seniority_rank", "name", "email", "phone_number", "timezone", "user", "is_active"]
     list_display_links = ["name"]
     list_editable = ["seniority_rank", "is_active"]
     ordering = ["seniority_rank"]

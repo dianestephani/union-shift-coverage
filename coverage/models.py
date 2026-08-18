@@ -2,6 +2,32 @@ from django.conf import settings
 from django.db import models
 from phonenumber_field.modelfields import PhoneNumberField
 
+# A curated subset of IANA timezone names, rather than the full ~350-entry
+# zoneinfo database, so the settings page dropdown stays easy to scan.
+TIMEZONE_CHOICES = [
+    ("Pacific/Honolulu", "Hawaii Time"),
+    ("America/Anchorage", "Alaska Time"),
+    ("America/Los_Angeles", "Pacific Time"),
+    ("America/Denver", "Mountain Time"),
+    ("America/Phoenix", "Arizona Time (no DST)"),
+    ("America/Chicago", "Central Time"),
+    ("America/New_York", "Eastern Time"),
+    ("America/Sao_Paulo", "Brasília Time"),
+    ("UTC", "UTC"),
+    ("Europe/London", "London"),
+    ("Europe/Paris", "Central European Time"),
+    ("Europe/Moscow", "Moscow Time"),
+    ("Africa/Cairo", "Cairo"),
+    ("Africa/Johannesburg", "Johannesburg"),
+    ("Asia/Dubai", "Gulf Standard Time"),
+    ("Asia/Kolkata", "India Standard Time"),
+    ("Asia/Shanghai", "China Standard Time"),
+    ("Asia/Tokyo", "Japan Standard Time"),
+    ("Asia/Singapore", "Singapore"),
+    ("Australia/Sydney", "Sydney"),
+    ("Pacific/Auckland", "Auckland"),
+]
+
 
 class Employee(models.Model):
     """
@@ -30,6 +56,12 @@ class Employee(models.Model):
         help_text="1 = most senior. Lower numbers have higher seniority.",
     )
     is_active = models.BooleanField(default=True)
+    timezone = models.CharField(
+        max_length=64,
+        choices=TIMEZONE_CHOICES,
+        default="America/Chicago",
+        help_text="Timestamps you see in the app (notifications, request history) are shown in this timezone.",
+    )
 
     class Meta:
         ordering = ["seniority_rank"]

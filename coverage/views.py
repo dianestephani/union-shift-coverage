@@ -8,7 +8,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from .coverage_service import handle_response, start_coverage_search
-from .forms import ShiftRequestForm
+from .forms import EmployeeSettingsForm, ShiftRequestForm
 from .models import CoverageEvent, Employee, Notification, ShiftRequest, ShiftResponse
 from .notifications import prune_notifications
 
@@ -84,6 +84,26 @@ def dashboard(request):
         "my_pending_responses": my_pending_responses,
         "my_covering": my_covering,
         "my_declined": my_declined,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+@login_required_employee
+def settings_page(request):
+    employee = _get_logged_in_employee(request)
+    form = EmployeeSettingsForm(request.POST or None, instance=employee)
+
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "Settings saved.")
+        return redirect("settings")
+
+    return render(request, "coverage/settings.html", {
+        "employee": employee,
+        "form": form,
     })
 
 

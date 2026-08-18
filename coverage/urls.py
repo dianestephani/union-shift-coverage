@@ -8,6 +8,7 @@ urlpatterns = [
     # App
     path("", views.dashboard, name="dashboard"),
     path("roster/", views.roster, name="roster"),
+    path("settings/", views.settings_page, name="settings"),
     path("request/new/", views.shift_request_new, name="shift_request_new"),
     path("request/<int:pk>/", views.shift_request_detail, name="shift_request_detail"),
     path("request/<int:pk>/activate/", views.shift_request_activate, name="shift_request_activate"),

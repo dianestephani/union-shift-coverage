@@ -1,6 +1,6 @@
 from django import forms
 from django.utils import timezone
-from .models import ShiftRequest
+from .models import Employee, ShiftRequest
 
 
 class ShiftRequestForm(forms.ModelForm):
@@ -33,3 +33,10 @@ class ShiftRequestForm(forms.ModelForm):
         if start_time and end_time and end_time <= start_time:
             raise forms.ValidationError("End time must be after start time.")
         return cleaned_data
+
+
+class EmployeeSettingsForm(forms.ModelForm):
+    class Meta:
+        model = Employee
+        fields = ["timezone"]
+        labels = {"timezone": "Timezone"}
