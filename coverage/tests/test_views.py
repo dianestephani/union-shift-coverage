@@ -120,6 +120,29 @@ class SettingsViewTests(TestCase):
         self.alice.refresh_from_db()
         self.assertEqual(self.alice.timezone, "America/Chicago")
 
+    def test_military_time_defaults_to_off(self):
+        self.assertFalse(self.alice.military_time)
+
+    def test_post_enables_military_time(self):
+        self.client.force_login(self.alice.user)
+        # Checkboxes only appear in POST data when checked.
+        response = self.client.post(
+            reverse("settings"), {"timezone": "America/Chicago", "military_time": "on"}
+        )
+        self.assertRedirects(response, reverse("settings"))
+        self.alice.refresh_from_db()
+        self.assertTrue(self.alice.military_time)
+
+    def test_omitting_military_time_from_post_turns_it_off(self):
+        self.alice.military_time = True
+        self.alice.save(update_fields=["military_time"])
+
+        self.client.force_login(self.alice.user)
+        self.client.post(reverse("settings"), {"timezone": "America/Chicago"})
+
+        self.alice.refresh_from_db()
+        self.assertFalse(self.alice.military_time)
+
 
 class EmployeeTimezoneMiddlewareTests(TestCase):
     """
@@ -146,6 +169,21 @@ class EmployeeTimezoneMiddlewareTests(TestCase):
         self.client.force_login(self.alice.user)
         self.client.get(reverse("dashboard"))
         self.assertEqual(str(timezone.get_current_timezone()), "America/Chicago")
+
+    def test_dashboard_shows_12h_time_by_default(self):
+        make_shift_request(self.alice, start_time=datetime.time(14, 0), end_time=datetime.time(22, 0))
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "2:00 PM–10:00 PM")
+
+    def test_dashboard_shows_24h_time_when_employee_prefers_it(self):
+        self.alice.military_time = True
+        self.alice.save(update_fields=["military_time"])
+        make_shift_request(self.alice, start_time=datetime.time(14, 0), end_time=datetime.time(22, 0))
+
+        self.client.force_login(self.alice.user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "14:00–22:00")
 
     def test_falls_back_to_server_timezone_when_logged_out(self):
         from django.conf import settings

@@ -38,5 +38,5 @@ class ShiftRequestForm(forms.ModelForm):
 class EmployeeSettingsForm(forms.ModelForm):
     class Meta:
         model = Employee
-        fields = ["timezone"]
-        labels = {"timezone": "Timezone"}
+        fields = ["timezone", "military_time"]
+        labels = {"timezone": "Timezone", "military_time": "Use 24-hour time (e.g. 14:00 instead of 2:00 PM)"}
