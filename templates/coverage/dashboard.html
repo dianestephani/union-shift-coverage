@@ -45,6 +45,7 @@
         <th>Date</th>
         <th>Time</th>
         <th>Status</th>
+        <th>Waiting on</th>
         <th>Covered by</th>
         <th></th>
       </tr>
@@ -59,6 +60,13 @@
         <td>{{ sr.time_display }}</td>
         <td>
           <span class="badge badge-{{ sr.status|lower }}">{{ sr.get_status_display }}</span>
+        </td>
+        <td>
+          {% if sr.status == "SEARCHING" %}
+            {{ sr.current_candidate.name|default:"—" }}
+          {% else %}
+            —
+          {% endif %}
         </td>
         <td>{{ sr.covered_by.name|default:"—" }}</td>
         <td style="text-align:right;">

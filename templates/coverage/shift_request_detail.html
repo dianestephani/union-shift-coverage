@@ -28,6 +28,12 @@
       <p>{{ sr.notes }}</p>
     </div>
     {% endif %}
+    {% if sr.status == "SEARCHING" and sr.current_candidate %}
+    <div style="grid-column:1/-1;">
+      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Waiting on</p>
+      <p style="font-weight:600;">{{ sr.current_candidate.name }}</p>
+    </div>
+    {% endif %}
     {% if sr.covered_by %}
     <div style="grid-column:1/-1;">
       <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Covered by</p>

@@ -49,7 +49,9 @@ def login_view(request):
 @login_required_employee
 def dashboard(request):
     employee = _get_logged_in_employee(request)
-    my_requests = ShiftRequest.objects.filter(requester=employee).order_by("-created_at")
+    my_requests = ShiftRequest.objects.filter(requester=employee).select_related(
+        "current_candidate", "covered_by"
+    ).order_by("-created_at")
     my_pending_responses = ShiftResponse.objects.filter(
         employee=employee, answer=ShiftResponse.Answer.PENDING
     ).select_related("shift_request", "shift_request__requester")
@@ -57,6 +59,20 @@ def dashboard(request):
         "employee": employee,
         "my_requests": my_requests,
         "my_pending_responses": my_pending_responses,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Roster
+# ---------------------------------------------------------------------------
+
+@login_required_employee
+def roster(request):
+    employee = _get_logged_in_employee(request)
+    employees = Employee.objects.all().order_by("seniority_rank")
+    return render(request, "coverage/roster.html", {
+        "employee": employee,
+        "employees": employees,
     })
 
 
@@ -105,7 +121,11 @@ def shift_request_new(request):
 @login_required_employee
 def shift_request_detail(request, pk):
     employee = _get_logged_in_employee(request)
-    sr = get_object_or_404(ShiftRequest, pk=pk, requester=employee)
+    sr = get_object_or_404(
+        ShiftRequest.objects.select_related("current_candidate", "covered_by"),
+        pk=pk,
+        requester=employee,
+    )
     events = sr.events.select_related("employee").order_by("created_at")
     responses = sr.responses.select_related("employee").order_by("asked_at")
     return render(request, "coverage/shift_request_detail.html", {
