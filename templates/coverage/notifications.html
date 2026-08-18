@@ -3,40 +3,40 @@
 {% block title %}Notifications – Shift Coverage{% endblock %}
 
 {% block content %}
-<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem;">
+<div class="page-header">
   <div>
-    <h1 style="font-size:1.4rem;">Notifications</h1>
-    <p style="color:var(--muted); font-size:0.9rem;">
+    <h1 class="page-title">Notifications</h1>
+    <p class="page-subtitle">
       Notifications are kept for 24 hours and only the 10 most recent are stored.
     </p>
   </div>
 </div>
 
-<div class="card" style="padding:0; overflow:hidden;">
+<div class="card card-flush">
   {% if notifications %}
   <div class="scroll-list">
     {% for n in notifications %}
-    <div class="list-item" data-notif-id="{{ n.pk }}" style="{% if n.read_at %}opacity:0.6;{% endif %}">
-      <p style="margin-bottom:0.4rem; font-size:0.9rem;">{{ n.message }}</p>
-      <p style="margin-bottom:0.6rem; color:var(--muted); font-size:0.8rem;">
+    <div class="list-item {% if n.read_at %}is-read{% endif %}" data-notif-id="{{ n.pk }}">
+      <p class="mb-sm text-sm">{{ n.message }}</p>
+      <p class="mb-sm text-muted text-xs">
         {{ n.created_at|user_datetime }}
         {% if not n.read_at %}<span class="badge badge-searching">Unread</span>{% endif %}
       </p>
       {% if n.action_response_id and n.action_response.answer == "PENDING" %}
-        <form method="post" action="{% url 'respond_to_shift' n.action_response_id %}" style="display:inline;">
+        <form method="post" action="{% url 'respond_to_shift' n.action_response_id %}" class="inline-form">
           {% csrf_token %}
           <input type="hidden" name="next" value="{% url 'notifications_page' %}">
           <input type="hidden" name="answer" value="YES">
           <button type="submit" class="btn btn-success btn-sm">Yes, I can cover</button>
         </form>
-        <form method="post" action="{% url 'respond_to_shift' n.action_response_id %}" style="display:inline;">
+        <form method="post" action="{% url 'respond_to_shift' n.action_response_id %}" class="inline-form">
           {% csrf_token %}
           <input type="hidden" name="next" value="{% url 'notifications_page' %}">
           <input type="hidden" name="answer" value="NO">
           <button type="submit" class="btn btn-outline btn-sm">No, can't make it</button>
         </form>
       {% elif not n.read_at %}
-        <form method="post" action="{% url 'notification_mark_read' n.pk %}" style="display:inline;">
+        <form method="post" action="{% url 'notification_mark_read' n.pk %}" class="inline-form">
           {% csrf_token %}
           <input type="hidden" name="next" value="{% url 'notifications_page' %}">
           <button type="submit" class="btn btn-outline btn-sm">Mark as read</button>

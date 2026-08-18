@@ -2,17 +2,17 @@
 {% block title %}Dashboard – Shift Coverage{% endblock %}
 
 {% block content %}
-<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.25rem;">
+<div class="page-header">
   <div>
-    <h1 style="font-size:1.4rem;">My Shift Requests</h1>
-    <p style="color:var(--muted); font-size:0.9rem;">Logged in as {{ employee.name }}</p>
+    <h1 class="page-title">My Shift Requests</h1>
+    <p class="page-subtitle">Logged in as {{ employee.name }}</p>
   </div>
   <a href="{% url 'shift_request_new' %}" class="btn btn-primary">+ New Request</a>
 </div>
 
-<h2 style="font-size:1.1rem; margin-bottom:0.75rem;">Shifts You've Offered</h2>
-<div class="card" style="padding:0; overflow:hidden; margin-bottom:1.5rem;">
-  {% if my_requests %}
+<h2 class="section-title">Shifts You've Offered</h2>
+<div class="card card-flush mb-xl">
+  {% if my_requests_page %}
   <table>
     <thead>
       <tr>
@@ -25,11 +25,11 @@
       </tr>
     </thead>
     <tbody>
-    {% for sr in my_requests %}
+    {% for sr in my_requests_page %}
       <tr>
         <td>
           <strong>{{ sr.day_display }}</strong><br>
-          <span style="color:var(--muted); font-size:0.85rem;">{{ sr.date_display }}</span>
+          <span class="text-muted text-sm">{{ sr.date_display }}</span>
         </td>
         <td>{{ sr.time_display }}</td>
         <td>
@@ -43,19 +43,20 @@
           {% endif %}
         </td>
         <td>{{ sr.covered_by.name|default:"—" }}</td>
-        <td style="text-align:right;">
+        <td class="text-right">
           <a href="{% url 'shift_request_detail' sr.pk %}" class="btn btn-outline btn-sm">View</a>
         </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
+  {% include "coverage/_pagination.html" with page_obj=my_requests_page page_param="page" %}
   {% else %}
   <p class="empty">No shift requests yet. <a href="{% url 'shift_request_new' %}">Create one →</a></p>
   {% endif %}
 </div>
 
-<h2 style="font-size:1.1rem; margin-bottom:0.75rem;">My Coverage Requests</h2>
+<h2 class="section-title">My Coverage Requests</h2>
 <div class="coverage-lists">
 
   <div class="card">
@@ -63,18 +64,18 @@
     <div class="scroll-list">
       {% for r in my_pending_responses %}
       <div class="list-item">
-        <p style="margin-bottom:0.6rem; font-size:0.9rem;">
+        <p class="list-item-text">
           <strong>{{ r.shift_request.requester.name }}</strong> needs coverage on
           {{ r.shift_request.day_display }}, {{ r.shift_request.date_display }}
           ({{ r.shift_request.time_display }}).
         </p>
-        <form method="post" action="{% url 'respond_to_shift' r.pk %}" style="display:inline;">
+        <form method="post" action="{% url 'respond_to_shift' r.pk %}" class="inline-form">
           {% csrf_token %}
           <input type="hidden" name="next" value="{% url 'dashboard' %}">
           <input type="hidden" name="answer" value="YES">
           <button type="submit" class="btn btn-success btn-sm">Yes, I can cover</button>
         </form>
-        <form method="post" action="{% url 'respond_to_shift' r.pk %}" style="display:inline;">
+        <form method="post" action="{% url 'respond_to_shift' r.pk %}" class="inline-form">
           {% csrf_token %}
           <input type="hidden" name="next" value="{% url 'dashboard' %}">
           <input type="hidden" name="answer" value="NO">
@@ -82,7 +83,7 @@
         </form>
       </div>
       {% empty %}
-      <p class="empty" style="padding:1rem;">Nothing waiting on you.</p>
+      <p class="empty empty-inset">Nothing waiting on you.</p>
       {% endfor %}
     </div>
   </div>
@@ -92,36 +93,36 @@
     <div class="scroll-list">
       {% for r in my_covering %}
       <div class="list-item">
-        <p style="font-size:0.9rem;">
+        <p class="text-sm">
           <strong>{{ r.shift_request.requester.name }}</strong> —
           {{ r.shift_request.day_display }}, {{ r.shift_request.date_display }}
           ({{ r.shift_request.time_display }})
         </p>
       </div>
       {% empty %}
-      <p class="empty" style="padding:1rem;">You're not covering anything right now.</p>
+      <p class="empty empty-inset">You're not covering anything right now.</p>
       {% endfor %}
     </div>
   </div>
 
 </div>
 
-<details style="margin-top:1.5rem;">
-  <summary style="cursor:pointer; color:var(--muted); font-size:0.95rem; padding:0.5rem 0;">
+<details class="mt-xl">
+  <summary class="disclosure-summary">
     You declined <span class="list-count">{{ my_declined|length }}</span>
   </summary>
-  <div class="card" style="margin-top:0.5rem;">
+  <div class="card mt-sm">
     <div class="scroll-list">
       {% for r in my_declined %}
       <div class="list-item">
-        <p style="font-size:0.9rem;">
+        <p class="text-sm">
           <strong>{{ r.shift_request.requester.name }}</strong> —
           {{ r.shift_request.day_display }}, {{ r.shift_request.date_display }}
           ({{ r.shift_request.time_display }})
         </p>
       </div>
       {% empty %}
-      <p class="empty" style="padding:1rem;">You haven't declined anything.</p>
+      <p class="empty empty-inset">You haven't declined anything.</p>
       {% endfor %}
     </div>
   </div>

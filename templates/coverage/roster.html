@@ -2,15 +2,15 @@
 {% block title %}Roster – Shift Coverage{% endblock %}
 
 {% block content %}
-<div style="margin-bottom:1.25rem;">
-  <h1 style="font-size:1.4rem;">Roster</h1>
-  <p style="color:var(--muted); font-size:0.9rem;">
+<div class="mb-lg">
+  <h1 class="page-title">Roster</h1>
+  <p class="page-subtitle">
     Coverage requests cascade from the requester down through this list, most senior first.
   </p>
 </div>
 
-<div class="card" style="padding:0; overflow:hidden;">
-  {% if employees %}
+<div class="card card-flush">
+  {% if employees_page %}
   <table>
     <thead>
       <tr>
@@ -22,12 +22,12 @@
       </tr>
     </thead>
     <tbody>
-    {% for e in employees %}
+    {% for e in employees_page %}
       <tr>
         <td>#{{ e.seniority_rank }}</td>
         <td>
           {{ e.name }}
-          {% if e == employee %}<span style="color:var(--muted); font-size:0.85rem;">(you)</span>{% endif %}
+          {% if e == employee %}<span class="text-muted text-sm">(you)</span>{% endif %}
         </td>
         <td>{{ e.email|default:"—" }}</td>
         <td>{{ e.phone_number|default:"—" }}</td>
@@ -42,6 +42,7 @@
     {% endfor %}
     </tbody>
   </table>
+  {% include "coverage/_pagination.html" with page_obj=employees_page page_param="page" %}
   {% else %}
   <p class="empty">No employees on the roster yet.</p>
   {% endif %}

@@ -3,12 +3,12 @@
 {% block title %}{{ target.name }} – Shift Coverage{% endblock %}
 
 {% block content %}
-<div style="margin-bottom:1rem;">
-  <a href="{% url 'manager_dashboard' %}" style="font-size:0.875rem; color:var(--muted);">← Back to manager dashboard</a>
+<div class="mb-md">
+  <a href="{% url 'manager_dashboard' %}" class="back-link">← Back to manager dashboard</a>
 </div>
 
-<div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:1.25rem;">
-  <h1 style="font-size:1.4rem;">{{ target.name }}</h1>
+<div class="header-row">
+  <h1 class="page-title">{{ target.name }}</h1>
   {% if target.is_active %}
     <span class="badge badge-covered">Active</span>
   {% else %}
@@ -17,30 +17,30 @@
   {% if target.is_manager %}<span class="badge badge-searching">Manager</span>{% endif %}
 </div>
 
-<div class="card" style="margin-bottom:1.5rem;">
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+<div class="card mb-xl">
+  <div class="detail-grid">
     <div>
-      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Seniority rank</p>
+      <p class="field-label">Seniority rank</p>
       <p>#{{ target.seniority_rank }}</p>
     </div>
     <div>
-      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Email</p>
+      <p class="field-label">Email</p>
       <p>{{ target.email|default:"—" }}</p>
     </div>
     <div>
-      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Phone</p>
+      <p class="field-label">Phone</p>
       <p>{{ target.phone_number|default:"—" }}</p>
     </div>
     <div>
-      <p style="font-size:0.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.05em;">Timezone</p>
+      <p class="field-label">Timezone</p>
       <p>{{ target.get_timezone_display }}</p>
     </div>
   </div>
 </div>
 
-<h2 style="font-size:1.1rem; margin-bottom:0.75rem;">Requests made <span class="list-count">{{ requests|length }}</span></h2>
-<div class="card" style="padding:0; overflow:hidden; margin-bottom:1.5rem;">
-  {% if requests %}
+<h2 class="section-title">Requests made <span class="list-count">{{ requests_page.paginator.count }}</span></h2>
+<div class="card card-flush mb-xl">
+  {% if requests_page %}
   <table>
     <thead>
       <tr>
@@ -52,30 +52,31 @@
       </tr>
     </thead>
     <tbody>
-    {% for sr in requests %}
+    {% for sr in requests_page %}
       <tr>
         <td>
           <strong>{{ sr.day_display }}</strong><br>
-          <span style="color:var(--muted); font-size:0.85rem;">{{ sr.date_display }}</span>
+          <span class="text-muted text-sm">{{ sr.date_display }}</span>
         </td>
         <td>{{ sr.time_display }}</td>
         <td><span class="badge badge-{{ sr.status|lower }}">{{ sr.get_status_display }}</span></td>
         <td>{{ sr.covered_by.name|default:"—" }}</td>
-        <td style="text-align:right;">
+        <td class="text-right">
           <a href="{% url 'shift_request_detail' sr.pk %}" class="btn btn-outline btn-sm">View</a>
         </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
+  {% include "coverage/_pagination.html" with page_obj=requests_page page_param="requests_page" %}
   {% else %}
   <p class="empty">{{ target.name }} hasn't requested any coverage.</p>
   {% endif %}
 </div>
 
-<h2 style="font-size:1.1rem; margin-bottom:0.75rem;">Coverage responses <span class="list-count">{{ responses|length }}</span></h2>
-<div class="card" style="padding:0; overflow:hidden;">
-  {% if responses %}
+<h2 class="section-title">Coverage responses <span class="list-count">{{ responses_page.paginator.count }}</span></h2>
+<div class="card card-flush">
+  {% if responses_page %}
   <table>
     <thead>
       <tr>
@@ -87,11 +88,11 @@
       </tr>
     </thead>
     <tbody>
-    {% for r in responses %}
+    {% for r in responses_page %}
       <tr>
         <td>{{ r.shift_request.requester.name }}</td>
         <td>{{ r.shift_request.date_display }}</td>
-        <td style="font-size:0.85rem; color:var(--muted);">{{ r.asked_at|user_datetime_short }}</td>
+        <td class="text-muted text-sm">{{ r.asked_at|user_datetime_short }}</td>
         <td>
           {% if r.answer == "YES" %}
             <span class="badge badge-covered">{{ r.get_answer_display }}</span>
@@ -101,13 +102,14 @@
             <span class="badge badge-draft">Pending</span>
           {% endif %}
         </td>
-        <td style="text-align:right;">
+        <td class="text-right">
           <a href="{% url 'shift_request_detail' r.shift_request_id %}" class="btn btn-outline btn-sm">View</a>
         </td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
+  {% include "coverage/_pagination.html" with page_obj=responses_page page_param="responses_page" %}
   {% else %}
   <p class="empty">{{ target.name }} hasn't been asked to cover anything.</p>
   {% endif %}

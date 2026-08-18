@@ -187,12 +187,93 @@
     .notif-item { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
     .notif-item:last-child { border-bottom: none; }
     .notif-item a { color: var(--accent); }
+    .notif-actions { margin-top: 0.5rem; }
+
+    /* ---------------------------------------------------------------
+       Utilities & shared layout classes.
+       These exist so pages don't repeat the same style="..." attribute
+       across a dozen templates — change spacing/color here once instead
+       of hunting down every inline occurrence.
+       ------------------------------------------------------------- */
+    .header { position: relative; }
+    .nav { display: flex; align-items: center; }
+
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.25rem;
+    }
+    .header-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+    .page-title { font-size: 1.4rem; }
+    .page-subtitle { color: var(--muted); font-size: 0.9rem; }
+    .section-title { font-size: 1.1rem; margin-bottom: 0.75rem; }
+    .back-link { font-size: 0.875rem; color: var(--muted); text-decoration: none; }
+    .back-link:hover { color: var(--text); }
+
+    .card-flush { padding: 0; overflow: hidden; }
+
+    .field-label {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .detail-grid-full { grid-column: 1 / -1; }
+
+    .button-row { display: flex; gap: 0.75rem; }
+    .inline-form { display: inline; }
+    .flex-1 { flex: 1; }
+    .full-width { width: 100%; }
+    .narrow-form { max-width: 520px; margin: 0 auto; }
+    .auth-card { max-width: 400px; margin: 4rem auto; }
+
+    .text-muted { color: var(--muted); }
+    .text-sm { font-size: 0.85rem; }
+    .text-xs { font-size: 0.8rem; }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .text-nowrap { white-space: nowrap; }
+    .font-semibold { font-weight: 600; }
+    .text-success { color: var(--success); }
+
+    .list-item-text { margin-bottom: 0.6rem; font-size: 0.9rem; }
+    .cell-wrap { max-width: 260px; word-break: break-word; }
+    .is-read { opacity: 0.6; }
+    .empty-inset { padding: 1rem; }
+    .disclosure-summary { cursor: pointer; color: var(--muted); font-size: 0.95rem; padding: 0.5rem 0; }
+
+    .mb-xs { margin-bottom: 0.25rem; }
+    .mt-sm { margin-top: 0.5rem; }
+    .mt-md { margin-top: 0.75rem; }
+    .mt-lg { margin-top: 1.25rem; }
+    .mt-xl { margin-top: 1.5rem; }
+    .mb-sm { margin-bottom: 0.5rem; }
+    .mb-md { margin-bottom: 0.75rem; }
+    .mb-lg { margin-bottom: 1.25rem; }
+    .mb-xl { margin-bottom: 1.5rem; }
+
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
   </style>
 </head>
 <body>
-<header style="position:relative;">
+<header class="header">
   <a class="brand" href="/">Shift Coverage</a>
-  <nav style="display:flex; align-items:center;">
+  <nav class="nav">
     {% if request.user.is_authenticated and employee %}
       <a href="{% url 'dashboard' %}">Dashboard</a>
       <a href="{% url 'roster' %}">Roster</a>
@@ -255,7 +336,7 @@
     dropdown.innerHTML = data.notifications.map(function (n) {
       let actions = "";
       if (n.action_response_id) {
-        actions = '<div style="margin-top:0.5rem;">' +
+        actions = '<div class="notif-actions">' +
           '<button type="button" class="btn btn-success btn-sm notif-answer" ' +
           'data-response-id="' + n.action_response_id + '" data-notif-id="' + n.id + '" data-answer="YES">Yes, I can cover</button> ' +
           '<button type="button" class="btn btn-outline btn-sm notif-answer" ' +

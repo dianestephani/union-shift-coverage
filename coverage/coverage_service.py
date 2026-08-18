@@ -138,21 +138,39 @@ def _handle_yes(sr: ShiftRequest, employee: Employee) -> str:
     return f"Shift covered by {employee.name}."
 
 
+def _find_next_untried_candidate(sr: ShiftRequest, employee: Employee) -> Employee | None:
+    """
+    The next active employee below `employee` in seniority who hasn't
+    already answered this request. Fetches the remaining roster and the
+    set of already-answered employees in one query each, and walks them in
+    Python — instead of one query per skipped candidate (as a
+    `while ...: candidate = candidate.get_next_in_roster()` loop would do),
+    which could mean O(k) DB round-trips for a single decline on a roster
+    with many already-answered candidates.
+    """
+    already_answered_ids = set(
+        ShiftResponse.objects.filter(shift_request=sr)
+        .exclude(answer=ShiftResponse.Answer.PENDING)
+        .values_list("employee_id", flat=True)
+    )
+    remaining_roster = Employee.objects.filter(
+        seniority_rank__gt=employee.seniority_rank,
+        is_active=True,
+    ).order_by("seniority_rank")
+
+    for candidate in remaining_roster:
+        if candidate.id not in already_answered_ids:
+            return candidate
+    return None
+
+
 def _handle_no(sr: ShiftRequest, employee: Employee) -> str:
     day, date, time = _shift_context(sr)
     decline_msg = msg_declined_notification(employee.name, date)
     notify(sr.requester, sr, decline_msg)
     _log(sr, CoverageEvent.EventType.NOTIFICATION_SENT, employee=sr.requester, message=decline_msg)
 
-    # Advance to next candidate
-    next_candidate = employee.get_next_in_roster()
-
-    # Skip candidates who have already been asked
-    while next_candidate and ShiftResponse.objects.filter(
-        shift_request=sr,
-        employee=next_candidate,
-    ).exclude(answer=ShiftResponse.Answer.PENDING).exists():
-        next_candidate = next_candidate.get_next_in_roster()
+    next_candidate = _find_next_untried_candidate(sr, employee)
 
     if next_candidate is None:
         sr.status = ShiftRequest.Status.UNCOVERED
