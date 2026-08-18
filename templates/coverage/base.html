@@ -196,6 +196,7 @@
       <a href="{% url 'dashboard' %}">Dashboard</a>
       <a href="{% url 'roster' %}">Roster</a>
       <a href="{% url 'shift_request_new' %}">+ New Request</a>
+      {% if employee.is_manager %}<a href="{% url 'manager_dashboard' %}">Manager</a>{% endif %}
       <a href="{% url 'settings' %}">Settings</a>
       <button type="button" class="notif-bell" id="notif-bell">
         🔔

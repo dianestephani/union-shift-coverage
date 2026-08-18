@@ -58,6 +58,10 @@ class Employee(models.Model):
         help_text="1 = most senior. Lower numbers have higher seniority.",
     )
     is_active = models.BooleanField(default=True)
+    is_manager = models.BooleanField(
+        default=False,
+        help_text="Managers can see every open request, the full roster, and each employee's history.",
+    )
     timezone = models.CharField(
         max_length=64,
         choices=TIMEZONE_CHOICES,
