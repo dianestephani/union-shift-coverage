@@ -126,3 +126,93 @@ class HandleResponseTests(TestCase):
 
         self.assertEqual(self.sr.current_candidate, dave)
         self.assertTrue(ShiftResponse.objects.filter(shift_request=self.sr, employee=dave).exists())
+
+    def test_rejects_response_to_a_cancelled_request(self):
+        # Bob's ask is still PENDING, but Alice cancelled the request out
+        # from under him after it went out.
+        coverage_service.cancel_request(self.sr, self.alice)
+        with self.assertRaises(ValueError):
+            coverage_service.handle_response(self.bob_response, self.bob, "YES")
+
+        self.bob_response.refresh_from_db()
+        self.assertEqual(self.bob_response.answer, ShiftResponse.Answer.PENDING)
+
+
+class CancelRequestTests(TestCase):
+    def setUp(self):
+        self.alice = make_employee("Alice", seniority_rank=1)
+        self.bob = make_employee("Bob", seniority_rank=2)
+
+    def test_cancel_a_draft(self):
+        sr = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        coverage_service.cancel_request(sr, self.alice)
+        sr.refresh_from_db()
+
+        self.assertEqual(sr.status, ShiftRequest.Status.CANCELLED)
+        event = CoverageEvent.objects.get(
+            shift_request=sr, event_type=CoverageEvent.EventType.CANCELLED
+        )
+        self.assertIn("Alice", event.message)
+        # No one was ever asked, so there's no one to notify.
+        self.assertFalse(Notification.objects.filter(shift_request=sr).exists())
+
+    def test_cancel_while_searching_notifies_current_candidate(self):
+        sr = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(sr)
+
+        coverage_service.cancel_request(sr, self.alice)
+        sr.refresh_from_db()
+
+        self.assertEqual(sr.status, ShiftRequest.Status.CANCELLED)
+        self.assertIsNone(sr.current_candidate)
+        self.assertTrue(
+            Notification.objects.filter(
+                employee=self.bob, shift_request=sr, message__icontains="cancelled"
+            ).exists()
+        )
+
+    def test_cancelling_does_not_touch_the_pending_shift_response(self):
+        # cancel_request doesn't mutate ShiftResponse rows — handle_response's
+        # own status check is what prevents a stale Yes/No from being acted on.
+        sr = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(sr)
+        bob_response = ShiftResponse.objects.get(shift_request=sr, employee=self.bob)
+
+        coverage_service.cancel_request(sr, self.alice)
+
+        bob_response.refresh_from_db()
+        self.assertEqual(bob_response.answer, ShiftResponse.Answer.PENDING)
+
+    def test_cannot_cancel_a_covered_request(self):
+        sr = make_shift_request(self.alice)
+        coverage_service.start_coverage_search(sr)
+        response = ShiftResponse.objects.get(shift_request=sr, employee=self.bob)
+        coverage_service.handle_response(response, self.bob, "YES")
+        sr.refresh_from_db()  # handle_response updated the DB row, not this local object
+
+        with self.assertRaises(ValueError):
+            coverage_service.cancel_request(sr, self.alice)
+
+        sr.refresh_from_db()
+        self.assertEqual(sr.status, ShiftRequest.Status.COVERED)
+
+    def test_cannot_cancel_an_uncovered_request(self):
+        sr = make_shift_request(self.bob)  # last in roster, so it exhausts immediately
+        coverage_service.start_coverage_search(sr)
+
+        with self.assertRaises(ValueError):
+            coverage_service.cancel_request(sr, self.bob)
+
+    def test_cannot_double_cancel(self):
+        sr = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        coverage_service.cancel_request(sr, self.alice)
+        with self.assertRaises(ValueError):
+            coverage_service.cancel_request(sr, self.alice)
+
+    def test_only_the_requester_can_cancel(self):
+        sr = make_shift_request(self.alice, status=ShiftRequest.Status.DRAFT)
+        with self.assertRaises(ValueError):
+            coverage_service.cancel_request(sr, self.bob)
+
+        sr.refresh_from_db()
+        self.assertEqual(sr.status, ShiftRequest.Status.DRAFT)

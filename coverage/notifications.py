@@ -8,6 +8,7 @@ from datetime import timedelta
 from django.utils import timezone
 
 from .models import Employee, Notification, ShiftRequest, ShiftResponse
+from .realtime import push_notification
 
 NOTIFICATION_RETENTION = timedelta(hours=24)
 MAX_NOTIFICATIONS_PER_EMPLOYEE = 10
@@ -19,7 +20,7 @@ def notify(
     message: str,
     action_response: ShiftResponse | None = None,
 ) -> Notification:
-    """Create an in-app notification for `employee`."""
+    """Create an in-app notification for `employee` and push it in real time."""
     notification = Notification.objects.create(
         employee=employee,
         shift_request=shift_request,
@@ -27,6 +28,22 @@ def notify(
         message=message,
     )
     prune_notifications(employee)
+
+    action_response_id = None
+    if action_response and action_response.answer == ShiftResponse.Answer.PENDING:
+        action_response_id = action_response.pk
+
+    push_notification(employee.id, {
+        "id": notification.pk,
+        "message": notification.message,
+        "shift_request_id": notification.shift_request_id,
+        "action_response_id": action_response_id,
+        "created_at": notification.created_at.isoformat(),
+        "unread_count": Notification.objects.filter(
+            employee=employee, read_at__isnull=True
+        ).count(),
+    })
+
     return notification
 
 
@@ -42,6 +59,7 @@ def prune_notifications(employee: Employee) -> None:
         employee=employee,
         action_response__isnull=False,
         action_response__answer=ShiftResponse.Answer.PENDING,
+        action_response__shift_request__status=ShiftRequest.Status.SEARCHING,
     )
 
     cutoff = timezone.now() - NOTIFICATION_RETENTION
@@ -78,3 +96,10 @@ def msg_covered_confirmation(coverer_name: str, requester_name: str, day: str, d
 
 def msg_declined_notification(decliner_name: str, date: str) -> str:
     return f"{decliner_name} has declined the shift on {date}."
+
+
+def msg_cancelled_notification(requester_name: str, day: str, date: str, time: str) -> str:
+    return (
+        f"{requester_name} cancelled their shift coverage request for {day}, "
+        f"{date} from {time}. No response needed."
+    )
