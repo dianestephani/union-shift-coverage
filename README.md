@@ -143,6 +143,89 @@ This looks like the normal Django command, but because `daphne` is listed first 
 
 Visit `http://127.0.0.1:8000/` and sign in with Google.
 
+**Heads up:** logging in only works with a real Google account — there's no test/sandbox login for OAuth. Whatever Google account you sign in with has to match the email on an `Employee` you created in step 5, or the app rejects it. If you don't have a Google account handy for testing, use a spare one rather than your main one, since you'll be signing into this app with it repeatedly.
+
+---
+
+## Deploying to Render (free tier)
+
+This section walks through putting the app on the internet using [Render](https://render.com), which has a genuinely free tier — no credit card, no trial period that expires. The tradeoff: a free instance spins down after about 15 minutes of no traffic, so the first request after a quiet stretch takes a few extra seconds to wake back up. Fine for a demo or portfolio project; not something you'd want for a real team relying on it.
+
+### Before you start, you'll need
+
+- **A GitHub account with this repo pushed to it.** Render deploys straight from a GitHub repo — you connect your GitHub account once, then pick the repo from a list.
+- **A Google Cloud OAuth client** (the same kind you set up for local dev in step 2 above) — you'll add a second redirect URI to it for the live site, rather than making a whole new one.
+- **A real Google account to test with**, same as local dev — and an `Employee` row with that same email, added through the live site's `/admin/`.
+
+### 1. Why the app needs a few production-only settings
+
+Everything below already lives in `shift_coverage/settings.py` — you don't need to write any of it. This is just explaining *why* it's there, since it's easy to assume a Django app runs the same everywhere and get confused when it doesn't:
+
+- **`SECURE_PROXY_SSL_HEADER`** — Render (like most hosts) terminates HTTPS at its own edge, then talks to your app over plain HTTP internally. Without telling Django to trust the header Render adds (`X-Forwarded-Proto`), Django thinks every request is insecure, which quietly breaks login and form submissions (CSRF checks fail).
+- **`SECURE_SSL_REDIRECT`** — forces any plain `http://` request to redirect to `https://`. Without this, a stray `http://` link (or someone typing the URL without `https`) generates insecure URLs elsewhere in the app, including Google's OAuth callback URL — which Google flatly refuses for anything other than `localhost`.
+- **`CSRF_TRUSTED_ORIGINS`** — an allowlist of origins Django will accept form submissions from. You set this to your live URL via an environment variable (see below).
+
+### 2. Create the Web Service on Render
+
+1. Sign up / log in at [render.com](https://render.com) with your GitHub account.
+2. **New → Web Service**, then pick this repo and the branch you want to deploy.
+3. Render will try to auto-detect a Python project. Set these two fields explicitly (its defaults skip steps this app actually needs):
+   - **Build Command:**
+
+     ```bash
+     pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate
+     ```
+
+     (`collectstatic` gathers every static file — including Django admin's own CSS/JS — into one folder for production. Skip it and *every* admin page 500s, not just the ones you'd expect.)
+   - **Start Command:**
+
+     ```bash
+     daphne -b 0.0.0.0 -p $PORT shift_coverage.asgi:application
+     ```
+
+     (Uses `daphne`, not Django's dev server or a plain WSGI server — the app needs ASGI to handle the WebSocket connection real-time notifications depend on.)
+4. **Instance Type:** Free.
+
+### 3. Set environment variables
+
+In the service's **Environment** tab:
+
+| Variable | Value |
+|---|---|
+| `SECRET_KEY` | Click Render's "Generate" button — don't reuse your local dev one |
+| `DEBUG` | `False` |
+| `ALLOWED_HOSTS` | `<your-app-name>.onrender.com` (Render assigns this after the first deploy) |
+| `CSRF_TRUSTED_ORIGINS` | `https://<your-app-name>.onrender.com` |
+| `GOOGLE_CLIENT_ID` | Same value as your local `.env` |
+| `GOOGLE_CLIENT_SECRET` | Same value as your local `.env` — copy carefully, a stray trailing space in this field is a surprisingly common way to break Google login |
+
+### 4. Add the production redirect URI in Google Cloud Console
+
+Go back to **Google Cloud Console → Credentials → your OAuth client → Authorized redirect URIs**, and add (keeping the `127.0.0.1` one for local dev too):
+
+```text
+https://<your-app-name>.onrender.com/accounts/google/login/callback/
+```
+
+It has to be `https://`, with the trailing slash, matching your Render URL exactly — Google does an exact string match, not a fuzzy one.
+
+### 5. Create an admin login without shell access
+
+Render's free tier doesn't include a shell into the running instance, so `python manage.py createsuperuser` isn't something you can run *on* Render directly. The workaround for a small/demo project: create the superuser **locally**, and since this project's SQLite database (`db.sqlite3`) gets deployed along with the rest of the code, that superuser comes along for the ride.
+
+```bash
+python manage.py createsuperuser
+```
+
+Then commit and push `db.sqlite3` like any other file. (Normally a database file is the last thing you'd want in git — it's only reasonable here because this is SQLite, a single file, on a demo project where you don't mind the data resetting on every deploy.)
+
+Once deployed, log into `/admin/` on the live site with that superuser and add your `Employee` row the same way you did locally in Setup step 5.
+
+### 6. Known limitations of this setup
+
+- **Data doesn't persist.** Render's free-tier disk is wiped and reset to whatever's in your last git push on every deploy or restart. Anything entered through the live app (new shift requests, employees added via `/admin/`, etc.) vanishes the next time you deploy. Fine for a demo; not something to build real usage on top of without adding a real database.
+- **One process only.** The real-time notification system uses `channels.layers.InMemoryChannelLayer`, which only works within a single running process — which is exactly what the free tier gives you, so it's fine as-is. If you ever scale to more than one worker/instance, see the note in `shift_coverage/settings.py`'s `CHANNEL_LAYERS` about switching to `channels_redis`.
+
 ---
 
 ## How the coverage flow works
@@ -263,3 +346,7 @@ A couple of tests are intentionally named `test_..._is_currently_accepted` (for 
 - Deactivating an employee (`is_active=False`) stops them from being asked for coverage, but does **not** stop them from logging in — see `coverage/adapters.py`. Worth revisiting if that matters for your use case.
 - The in-memory channel layer (real-time notifications) only works with a single server process — see the "How the real-time plumbing fits together" note above before deploying with more than one worker.
 - Email notification fallback
+
+---
+
+*A couple of things in this repo — the seeded `db.sqlite3` (including its demo superuser credentials) and `study-questions.md` — are here on purpose, left visible rather than cleaned up or gitignored, as a record of the reasoning and tradeoffs behind this project rather than something a real production app should ship with.*
