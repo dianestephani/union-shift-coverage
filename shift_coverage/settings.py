@@ -15,6 +15,11 @@ CSRF_TRUSTED_ORIGINS = [
     origin for origin in config("CSRF_TRUSTED_ORIGINS", default="").split(",") if origin
 ]
 
+# Without this, a plain http:// request is served as-is instead of being
+# redirected to https:// — which is why allauth was building an http://
+# Google OAuth callback URL that Google's non-localhost redirect URIs reject.
+SECURE_SSL_REDIRECT = not DEBUG
+
 INSTALLED_APPS = [
     # Must be first: this is what makes `manage.py runserver` serve ASGI
     # (HTTP + WebSockets) via Daphne instead of Django's default WSGI dev server.
