@@ -211,17 +211,27 @@ It has to be `https://`, with the trailing slash, matching your Render URL exact
 
 ### 5. Create an admin login without shell access
 
-Render's free tier doesn't include a shell into the running instance, so `python manage.py createsuperuser` isn't something you can run *on* Render directly. The workaround for a small/demo project: create the superuser **locally**, and since this project's SQLite database (`db.sqlite3`) gets deployed along with the rest of the code, that superuser comes along for the ride.
+Render's free tier doesn't include a shell into the running instance, so `python manage.py createsuperuser` isn't something you can run *on* Render directly. This step happens **on your own machine**, with your own copy of the repo — it's not a capability the deployed site exposes to anyone visiting it; a site visitor has no way to create a superuser of their own no matter what they click.
+
+The workaround for a small/demo project: create the superuser locally, and since this project's SQLite database (`db.sqlite3`) gets deployed along with the rest of the code, that superuser comes along for the ride.
 
 ```bash
 python manage.py createsuperuser
 ```
 
-Then commit and push `db.sqlite3` like any other file. (Normally a database file is the last thing you'd want in git — it's only reasonable here because this is SQLite, a single file, on a demo project where you don't mind the data resetting on every deploy.)
+Then commit and push `db.sqlite3` like any other file. (Normally a database file — and especially one holding a password hash — is the last thing you'd want in git. It's only reasonable here because this is SQLite, a single file, on a demo project with no real data, where you don't mind the data resetting on every deploy. Use a genuinely strong, unique password for this account regardless — the hash is technically crackable by anyone with repo access, even though the plaintext password itself is never written to any file.)
 
 Once deployed, log into `/admin/` on the live site with that superuser and add your `Employee` row the same way you did locally in Setup step 5.
 
-### 6. Known limitations of this setup
+### 6. Letting someone try the app without a Google account
+
+Google login requires a real Google account matching a provisioned `Employee` — fine for your own testing, not something you can hand a prospective employer or reviewer without extra setup on their end. To make that easier, there's a `DEMO_LOGIN_ENABLED` setting (off by default) that adds a "Try the demo" button to the login page, letting anyone skip Google entirely and log straight in as a seeded demo account.
+
+That demo account is deliberately limited: it's an app-level `Employee` with `is_manager=True` (so it can see the manager dashboard and everything else the app does), but its underlying Django `User` has `is_staff=False` and `is_superuser=False` — it cannot reach `/admin/` or do anything with Django's own admin tooling, no matter what. `coverage/views/dashboard.py`'s `demo_login` view enforces this itself (refuses to log anyone in through this route if the linked user is ever staff/superuser), so it's not just a matter of remembering to configure the seed data correctly.
+
+To turn it on: set `DEMO_LOGIN_ENABLED=True` as an environment variable and redeploy. **Turn it back off (or unset it) once whoever needed it is done** — it's meant to be temporary, not a permanent unauthenticated door into the app.
+
+### 7. Known limitations of this setup
 
 - **Data doesn't persist.** Render's free-tier disk is wiped and reset to whatever's in your last git push on every deploy or restart. Anything entered through the live app (new shift requests, employees added via `/admin/`, etc.) vanishes the next time you deploy. Fine for a demo; not something to build real usage on top of without adding a real database.
 - **One process only.** The real-time notification system uses `channels.layers.InMemoryChannelLayer`, which only works within a single running process — which is exactly what the free tier gives you, so it's fine as-is. If you ever scale to more than one worker/instance, see the note in `shift_coverage/settings.py`'s `CHANNEL_LAYERS` about switching to `channels_redis`.
@@ -349,4 +359,4 @@ A couple of tests are intentionally named `test_..._is_currently_accepted` (for 
 
 ---
 
-*A couple of things in this repo — the seeded `db.sqlite3` (including its demo superuser credentials) and `study-questions.md` — are here on purpose, left visible rather than cleaned up or gitignored, as a record of the reasoning and tradeoffs behind this project rather than something a real production app should ship with.*
+*A couple of things in this repo are here on purpose, left visible rather than cleaned up or gitignored, as a record of the reasoning and tradeoffs behind this project rather than something a real production app should ship with: the seeded `db.sqlite3` (which holds one admin account's password hash — not a plaintext password, and not something the public `DEMO_LOGIN_ENABLED` login can ever use to reach `/admin/`, see "Letting someone try the app without a Google account" above), and `study-questions.md`.*
