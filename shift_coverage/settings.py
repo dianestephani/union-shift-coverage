@@ -131,3 +131,8 @@ SOCIALACCOUNT_PROVIDERS = {
 SOCIALACCOUNT_LOGIN_ON_GET = True
 SOCIALACCOUNT_AUTO_SIGNUP = True
 SOCIALACCOUNT_ADAPTER = "coverage.adapters.CoverageSocialAccountAdapter"
+# Without this, a Google login whose email already belongs to an existing
+# User (e.g. one created manually via /admin/) fails signup outright
+# instead of linking the two — surfacing as a generic "Third-Party Login
+# Failure" page rather than a specific error.
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
