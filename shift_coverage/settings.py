@@ -20,6 +20,13 @@ CSRF_TRUSTED_ORIGINS = [
 # Google OAuth callback URL that Google's non-localhost redirect URIs reject.
 SECURE_SSL_REDIRECT = not DEBUG
 
+# Lets visitors skip Google OAuth entirely and log in as a seeded demo
+# Employee instead — for letting someone try the app without owning a
+# Google account that matches a provisioned Employee. Off by default;
+# flip on temporarily (e.g. for a portfolio review) via the env var.
+DEMO_LOGIN_ENABLED = config("DEMO_LOGIN_ENABLED", default=False, cast=bool)
+DEMO_EMPLOYEE_EMAIL = config("DEMO_EMPLOYEE_EMAIL", default="demo@example.com")
+
 INSTALLED_APPS = [
     # Must be first: this is what makes `manage.py runserver` serve ASGI
     # (HTTP + WebSockets) via Daphne instead of Django's default WSGI dev server.

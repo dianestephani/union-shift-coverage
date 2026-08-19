@@ -7,7 +7,7 @@ This __init__ re-exports every view function so `coverage/urls.py` can keep
 doing `from . import views` / `views.dashboard` unchanged — callers outside
 this package don't need to know it's a package instead of a single module.
 """
-from .dashboard import dashboard, login_view
+from .dashboard import dashboard, demo_login, login_view
 from .settings import settings_page
 from .roster import roster
 from .manager import manager_dashboard, manager_employee_detail
@@ -22,6 +22,7 @@ from .notifications import notifications_page, notifications_poll, notification_
 
 __all__ = [
     "dashboard",
+    "demo_login",
     "login_view",
     "settings_page",
     "roster",
